@@ -1,0 +1,116 @@
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from .. import __version__
+from ..db import SessionLocal, init_db
+from ..models import Job, Run
+from ..scheduler.cron import compute_next_run
+from ..scheduler.queue import enqueue_manual
+from .schemas import JobCreate, JobOut, RunDetailOut, RunOut
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(
+    title="Ti Cloud",
+    version=__version__,
+    description="Agent-native cron/loop scheduling with quality gates.",
+    lifespan=lifespan,
+)
+
+
+def db() -> Session:
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok", "version": __version__}
+
+
+@app.post("/jobs", response_model=JobOut, status_code=201)
+def create_job(body: JobCreate, session: Session = Depends(db)) -> Job:
+    if session.scalar(select(Job).where(Job.name == body.name)):
+        raise HTTPException(409, f"job named {body.name!r} already exists")
+    job = Job(**body.model_dump())
+    job.next_run_at = compute_next_run(job)
+    session.add(job)
+    session.commit()
+    return job
+
+
+@app.get("/jobs", response_model=list[JobOut])
+def list_jobs(session: Session = Depends(db)) -> list[Job]:
+    return session.scalars(select(Job).order_by(Job.created_at)).all()
+
+
+def _get_job(session: Session, job_id: str) -> Job:
+    job = session.get(Job, job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    return job
+
+
+@app.get("/jobs/{job_id}", response_model=JobOut)
+def get_job(job_id: str, session: Session = Depends(db)) -> Job:
+    return _get_job(session, job_id)
+
+
+@app.delete("/jobs/{job_id}", status_code=204)
+def delete_job(job_id: str, session: Session = Depends(db)) -> None:
+    session.delete(_get_job(session, job_id))
+    session.commit()
+
+
+@app.post("/jobs/{job_id}/trigger", response_model=RunOut, status_code=201)
+def trigger_job(job_id: str, session: Session = Depends(db)) -> Run:
+    """Fire a job immediately, outside its schedule."""
+    return enqueue_manual(session, _get_job(session, job_id))
+
+
+@app.post("/jobs/{job_id}/pause", response_model=JobOut)
+def pause_job(job_id: str, session: Session = Depends(db)) -> Job:
+    job = _get_job(session, job_id)
+    job.paused = True
+    session.commit()
+    return job
+
+
+@app.post("/jobs/{job_id}/resume", response_model=JobOut)
+def resume_job(job_id: str, session: Session = Depends(db)) -> Job:
+    job = _get_job(session, job_id)
+    job.paused = False
+    # Re-anchor the schedule so a long pause doesn't fire a backlog.
+    job.next_run_at = compute_next_run(job)
+    session.commit()
+    return job
+
+
+@app.get("/jobs/{job_id}/runs", response_model=list[RunOut])
+def list_runs(job_id: str, limit: int = 50, session: Session = Depends(db)) -> list[Run]:
+    _get_job(session, job_id)
+    return session.scalars(
+        select(Run)
+        .where(Run.job_id == job_id)
+        .order_by(Run.scheduled_at.desc())
+        .limit(min(limit, 200))
+    ).all()
+
+
+@app.get("/runs/{run_id}", response_model=RunDetailOut)
+def get_run(run_id: str, session: Session = Depends(db)) -> Run:
+    run = session.get(Run, run_id)
+    if run is None:
+        raise HTTPException(404, "run not found")
+    return run

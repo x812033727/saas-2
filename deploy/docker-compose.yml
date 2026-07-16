@@ -1,0 +1,41 @@
+# One-command self-host: docker compose -f deploy/docker-compose.yml up
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ticloud
+      POSTGRES_PASSWORD: ticloud
+      POSTGRES_DB: ticloud
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticloud"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      TICLOUD_DATABASE_URL: postgresql+psycopg2://ticloud:ticloud@db:5432/ticloud
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["python", "-m", "ticloud.scheduler.worker"]
+    environment:
+      TICLOUD_DATABASE_URL: postgresql+psycopg2://ticloud:ticloud@db:5432/ticloud
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
