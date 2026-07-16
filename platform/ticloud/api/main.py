@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 
 from .. import __version__
 from ..db import SessionLocal, init_db
-from ..models import Job, Run
+from ..models import Alert, Job, Run
 from ..scheduler.cron import compute_next_run
 from ..scheduler.queue import enqueue_manual
 from .schemas import (
+    AlertOut,
     JobCreate,
     JobOut,
     JobWithLastRun,
@@ -161,11 +162,30 @@ def job_stats(job_id: str, limit: int = 20, session: Session = Depends(db)) -> l
                 if r.started_at and r.finished_at
                 else None
             ),
+            score=r.score,
             scheduled_at=r.scheduled_at,
         )
         for r in runs
     ]
     return list(reversed(points))
+
+
+@app.get("/alerts", response_model=list[AlertOut])
+def list_alerts(acknowledged: bool | None = None, limit: int = 100, session: Session = Depends(db)) -> list[Alert]:
+    stmt = select(Alert).order_by(Alert.created_at.desc()).limit(min(limit, 500))
+    if acknowledged is not None:
+        stmt = stmt.where(Alert.acknowledged.is_(acknowledged))
+    return session.scalars(stmt).all()
+
+
+@app.post("/alerts/{alert_id}/ack", response_model=AlertOut)
+def ack_alert(alert_id: str, session: Session = Depends(db)) -> Alert:
+    alert = session.get(Alert, alert_id)
+    if alert is None:
+        raise HTTPException(404, "alert not found")
+    alert.acknowledged = True
+    session.commit()
+    return alert
 
 
 @app.get("/runs/{run_id}", response_model=RunDetailOut)

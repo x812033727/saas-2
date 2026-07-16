@@ -73,24 +73,30 @@ async function act(method, path, refresh) {
 
 /* ---------- sparkline (single series -> series-1; no legend needed) ---------- */
 
-function sparkline(points) {
-  if (points.length < 2) return `<div class="empty">not enough runs for a trend yet</div>`;
+function sparkline(points, { value, format, label, max = null, threshold = null } = {}) {
+  const pts = points.filter((p) => value(p) != null);
+  if (pts.length < 2) return `<div class="empty">not enough runs for a trend yet</div>`;
   const W = 640, H = 72, PAD = 8;
-  const costs = points.map((p) => p.cost_usd);
-  const max = Math.max(...costs, 1e-9);
-  const x = (i) => PAD + (i * (W - 2 * PAD)) / (points.length - 1);
-  const y = (v) => H - PAD - (v / max) * (H - 2 * PAD);
-  const path = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.cost_usd).toFixed(1)}`).join(" ");
-  const dots = points.map((p, i) => `
-    <circle class="pt" cx="${x(i).toFixed(1)}" cy="${y(p.cost_usd).toFixed(1)}" r="3">
-      <title>${esc(p.status)} · ${fmtMoney(p.cost_usd)} · ${esc(fmtTime(p.scheduled_at))}</title>
+  const vals = pts.map(value);
+  const vmax = max ?? Math.max(...vals, 1e-9);
+  const x = (i) => PAD + (i * (W - 2 * PAD)) / (pts.length - 1);
+  const y = (v) => H - PAD - (Math.min(v, vmax) / vmax) * (H - 2 * PAD);
+  const path = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(value(p)).toFixed(1)}`).join(" ");
+  const dots = pts.map((p, i) => `
+    <circle class="pt" cx="${x(i).toFixed(1)}" cy="${y(value(p)).toFixed(1)}" r="3">
+      <title>${esc(p.status)} · ${format(value(p))} · ${esc(fmtTime(p.scheduled_at))}</title>
     </circle>`).join("");
+  const gate = threshold != null ? `
+    <line class="threshold" x1="${PAD}" y1="${y(threshold).toFixed(1)}" x2="${W - PAD}" y2="${y(threshold).toFixed(1)}"/>
+    <text class="threshold-label" x="${W - PAD}" y="${(y(threshold) - 4).toFixed(1)}" text-anchor="end">gate ${format(threshold)}</text>` : "";
   return `
-    <svg class="spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="cost per run, most recent ${points.length} runs">
-      <line class="baseline" x1="${PAD}" y1="${H - PAD}" x2="${W - PAD}" y2="${H - PAD}"/>
+    <svg class="spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}, most recent ${pts.length} runs">
+      <line class="baseline" x1="${PAD}" y1="${H - PAD}" x2="${W - PAD}" y2="${H - PAD}"/>${gate}
       <path class="line" d="${path}"/>${dots}
     </svg>`;
 }
+
+const fmtScore = (v) => (v == null ? "—" : v.toFixed(2));
 
 /* ---------- views ---------- */
 
@@ -102,6 +108,8 @@ async function jobsView() {
       <td>${esc(scheduleText(j))}<br><small style="color:var(--muted)">next ${relTime(j.next_run_at)}</small></td>
       <td>${j.last_run ? badge(j.last_run.status) : '<span style="color:var(--muted)">never ran</span>'}
           ${j.last_run ? `<br><small style="color:var(--muted)">${relTime(j.last_run.scheduled_at)}</small>` : ""}</td>
+      <td class="num">${j.last_run ? fmtScore(j.last_run.score) : "—"}
+          ${j.score_threshold != null ? `<br><small style="color:var(--muted)">gate ${fmtScore(j.score_threshold)}</small>` : ""}</td>
       <td class="num">${j.last_run ? fmtMoney(j.last_run.cost_usd) : "—"}</td>
       <td class="actions" data-noclick>
         <button data-act="trigger" data-id="${j.id}">Run now</button>
@@ -114,7 +122,7 @@ async function jobsView() {
     <div class="sub">scheduled agent workshops, guarded by budget & timeout</div>
     <div class="card">
       ${jobs.length ? `<table>
-        <thead><tr><th>Job</th><th>Schedule</th><th>Last run</th><th class="num">Last cost</th><th></th></tr></thead>
+        <thead><tr><th>Job</th><th>Schedule</th><th>Last run</th><th class="num">Score</th><th class="num">Last cost</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table>`
       : `<div class="empty">No jobs yet — create your first one below.</div>`}
     </div>
@@ -128,6 +136,8 @@ async function jobsView() {
           <label>interval seconds (optional) <input name="interval_seconds" type="number" min="10" placeholder="3600"></label>
           <label>budget USD <input name="budget_usd" type="number" step="0.01" value="5.0"></label>
           <label>timeout s <input name="timeout_s" type="number" value="1800"></label>
+          <label>quality gate (0–1, optional) <input name="score_threshold" type="number" step="0.05" min="0" max="1" placeholder="0.7"></label>
+          <label>on low score <select name="on_low_score"><option>alert</option><option>pause</option></select></label>
           <button class="primary submit" type="submit">Create job</button>
         </form>
       </div>
@@ -141,6 +151,8 @@ async function jobsView() {
     if (f.get("interval_seconds")) body.interval_seconds = Number(f.get("interval_seconds"));
     body.budget_usd = Number(f.get("budget_usd"));
     body.timeout_s = Number(f.get("timeout_s"));
+    if (f.get("score_threshold")) body.score_threshold = Number(f.get("score_threshold"));
+    body.on_low_score = f.get("on_low_score");
     try { await api("/jobs", { method: "POST", body: JSON.stringify(body) }); toast("job created"); render(); }
     catch (e) { toast(e.message); }
   });
@@ -156,8 +168,9 @@ async function jobDetailView(id) {
       <td class="num">${r.attempt}</td>
       <td>${esc(fmtTime(r.scheduled_at))}<br><small style="color:var(--muted)">${relTime(r.scheduled_at)}</small></td>
       <td class="num">${duration(r.started_at, r.finished_at)}</td>
+      <td class="num">${fmtScore(r.score)}</td>
       <td class="num">${fmtMoney(r.cost_usd)}</td>
-      <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">
+      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">
         ${esc((r.error || "").split("\n").pop() || (r.result && r.result.summary) || "")}</td>
     </tr>`).join("");
 
@@ -171,12 +184,19 @@ async function jobDetailView(id) {
       <div class="tile"><div class="k">max retries</div><div class="v">${job.max_retries}</div></div>
       <div class="tile"><div class="k">runs recorded</div><div class="v">${runs.length}</div></div>
     </div>
+    <h2>Quality score per run (last ${stats.length})</h2>
+    <div class="card">${sparkline(stats, {
+      value: (p) => p.score, format: fmtScore, label: "quality score per run",
+      max: 1, threshold: job.score_threshold,
+    })}</div>
     <h2>Cost per run (last ${stats.length})</h2>
-    <div class="card">${sparkline(stats)}</div>
+    <div class="card">${sparkline(stats, {
+      value: (p) => p.cost_usd, format: fmtMoney, label: "cost per run",
+    })}</div>
     <h2>Run history</h2>
     <div class="card">
       ${runs.length ? `<table>
-        <thead><tr><th>Status</th><th class="num">Attempt</th><th>Scheduled</th><th class="num">Duration</th><th class="num">Cost</th><th>Note</th></tr></thead>
+        <thead><tr><th>Status</th><th class="num">Attempt</th><th>Scheduled</th><th class="num">Duration</th><th class="num">Score</th><th class="num">Cost</th><th>Note</th></tr></thead>
         <tbody>${rows}</tbody></table>`
       : `<div class="empty">No runs yet — trigger one from the jobs list.</div>`}
     </div>
@@ -206,11 +226,20 @@ async function runDetailView(id) {
     <h1>Run ${esc(run.id.slice(0, 8))} ${badge(run.status)}</h1>
     <div class="sub">attempt ${run.attempt} · scheduled ${esc(fmtTime(run.scheduled_at))}</div>
     <div class="tiles">
+      <div class="tile"><div class="k">quality score</div><div class="v">${fmtScore(run.score)}</div></div>
       <div class="tile"><div class="k">duration</div><div class="v">${duration(run.started_at, run.finished_at)}</div></div>
       <div class="tile"><div class="k">cost</div><div class="v">${fmtMoney(run.cost_usd)}</div></div>
       <div class="tile"><div class="k">tokens in / out</div><div class="v">${run.tokens_in}<small> / ${run.tokens_out}</small></div></div>
       <div class="tile"><div class="k">steps</div><div class="v">${run.steps.length}</div></div>
     </div>
+    ${run.scores && run.scores.length ? `<h2>Scorers</h2><div class="card">${run.scores.map((s) => `
+      <div class="scorecard">
+        <span class="verdict ${s.passed ? "pass" : "fail"}">${s.passed ? "✓" : "✕"}</span>
+        <span class="sname">${esc(s.scorer)}</span>
+        <span class="bar"><i style="width:${Math.round(s.score * 100)}%"></i></span>
+        <span class="sval">${fmtScore(s.score)}</span>
+        ${s.detail ? `<details><summary>detail</summary><pre>${esc(JSON.stringify(s.detail, null, 2))}</pre></details>` : ""}
+      </div>`).join("")}</div>` : ""}
     ${run.result ? `<h2>Result</h2><div class="card">${esc(run.result.summary || JSON.stringify(run.result))}</div>` : ""}
     ${run.error ? `<h2>Error</h2><div class="error-box">${esc(run.error)}</div>` : ""}
     <h2>Trace</h2>
@@ -218,6 +247,47 @@ async function runDetailView(id) {
 
   // Live trace: keep refreshing while the run is in flight.
   if (run.status === "running" || run.status === "queued") schedulePoll(2000);
+}
+
+async function alertsView() {
+  const alerts = await api("/alerts?limit=100");
+  const ALERT_BADGE = {
+    auto_paused: ["paused", "‖ auto-paused"],
+    run_failed: ["failed", "✕ run failed"],
+    low_score: ["timed_out", "▽ low score"],
+  };
+  const rows = alerts.map((a) => {
+    const [cls, label] = ALERT_BADGE[a.kind] || ["cancelled", a.kind];
+    return `
+    <tr>
+      <td><span class="badge ${cls}"><span class="dot"></span>${esc(label)}</span></td>
+      <td>${esc(a.message)}
+          ${a.run_id ? `<br><a href="#/runs/${a.run_id}"><small>view run</small></a>` : ""}</td>
+      <td>${esc(fmtTime(a.created_at))}<br><small style="color:var(--muted)">${relTime(a.created_at)}</small></td>
+      <td class="actions">${a.acknowledged
+        ? '<span style="color:var(--muted);font-size:13px">acked</span>'
+        : `<button data-ack="${a.id}">Ack</button>`}</td>
+    </tr>`;
+  }).join("");
+
+  app.innerHTML = `
+    <h1>Alerts</h1>
+    <div class="sub">what the quality gate and retry-exhaustion caught while nobody was watching</div>
+    <div class="card">
+      ${alerts.length ? `<table>
+        <thead><tr><th>Kind</th><th>Message</th><th>When</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table>`
+      : `<div class="empty">No alerts — everything your agents shipped passed the gate.</div>`}
+    </div>`;
+}
+
+async function refreshAlertCount() {
+  try {
+    const open = await api("/alerts?acknowledged=false&limit=100");
+    const el = document.getElementById("alert-count");
+    el.textContent = open.length;
+    el.hidden = open.length === 0;
+  } catch { /* topbar badge is best-effort */ }
 }
 
 /* ---------- router & polling ---------- */
@@ -231,8 +301,10 @@ async function render() {
   clearTimeout(pollTimer);
   const hash = location.hash || "#/jobs";
   const [, view, id] = hash.split("/");
+  refreshAlertCount();
   try {
     if (view === "runs" && id) await runDetailView(id);
+    else if (view === "alerts") { await alertsView(); schedulePoll(5000); }
     else if (view === "jobs" && id) { await jobDetailView(id); schedulePoll(3000); }
     else { await jobsView(); schedulePoll(3000); }
   } catch (e) {
@@ -242,6 +314,12 @@ async function render() {
 }
 
 app.addEventListener("click", (ev) => {
+  const ackBtn = ev.target.closest("button[data-ack]");
+  if (ackBtn) {
+    ev.stopPropagation();
+    act("POST", `/alerts/${ackBtn.dataset.ack}/ack`, render);
+    return;
+  }
   const btn = ev.target.closest("button[data-act]");
   if (btn) {
     ev.stopPropagation();

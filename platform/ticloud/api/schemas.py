@@ -16,6 +16,16 @@ class JobCreate(BaseModel):
     timeout_s: int = Field(default_factory=lambda: settings.default_timeout_s, ge=1)
     budget_usd: float = Field(default_factory=lambda: settings.default_budget_usd, gt=0)
     max_retries: int = Field(default_factory=lambda: settings.default_max_retries, ge=0)
+    score_threshold: float | None = Field(default=None, ge=0, le=1)
+    on_low_score: str = "alert"
+    scorers: dict = Field(default_factory=dict)
+
+    @field_validator("on_low_score")
+    @classmethod
+    def _valid_action(cls, v: str) -> str:
+        if v not in ("alert", "pause"):
+            raise ValueError("on_low_score must be 'alert' or 'pause'")
+        return v
 
     @field_validator("cron")
     @classmethod
@@ -44,6 +54,9 @@ class JobOut(BaseModel):
     timeout_s: int
     budget_usd: float
     max_retries: int
+    score_threshold: float | None
+    on_low_score: str
+    scorers: dict
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -83,8 +96,19 @@ class RunOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ScoreRecordOut(BaseModel):
+    scorer: str
+    score: float
+    passed: bool
+    detail: dict | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class RunDetailOut(RunOut):
     steps: list[RunStepOut]
+    scores: list[ScoreRecordOut]
 
 
 class JobWithLastRun(JobOut):
@@ -92,10 +116,23 @@ class JobWithLastRun(JobOut):
 
 
 class RunStatPoint(BaseModel):
-    """Lightweight per-run point for trend sparklines (drift precursor)."""
+    """Lightweight per-run point for trend sparklines (drift view)."""
 
     run_id: str
     status: str
     cost_usd: float
     duration_s: float | None
+    score: float | None
     scheduled_at: datetime
+
+
+class AlertOut(BaseModel):
+    id: str
+    job_id: str
+    run_id: str | None
+    kind: str
+    message: str
+    acknowledged: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

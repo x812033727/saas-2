@@ -13,8 +13,17 @@ recurring agent work actually needs:
   (a retry carries the previous error so the next attempt can adapt).
 - **Structured run traces** — every role turn and tool call recorded live
   (role, cost, tokens, timing), streamable to a UI.
-- **Quality gates** *(Phase 2)* — score every run (rule-based + LLM judge +
-  trajectory checks); low scores alert and auto-pause the schedule.
+- **Quality gates** — every finished run is scored automatically:
+  rule-based scorers (completion, **trajectory health** — stuck-loop and
+  review-verdict checks that catch "answer looked fine, process was broken"
+  silent failures — and cost anomaly vs the job's own history) plus an
+  optional Claude **LLM judge** (`pip install "platform[judge]"` +
+  `ANTHROPIC_API_KEY`, config `{"scorers": {"judge": {"enabled": true}}}`).
+  Score below the job's `score_threshold` → alert (webhook via
+  `TICLOUD_WEBHOOK_URL`, Slack-compatible) and, with
+  `on_low_score: "pause"`, the schedule **auto-pauses**.
+- **Drift view** — score and cost trends per job with the gate drawn in,
+  so slow degradation is visible before it becomes an incident.
 - **Knowledge flywheel** *(Phase 3)* — failures cluster into eval cases;
   lessons persist across runs, so nightly patrols get smarter over time.
 

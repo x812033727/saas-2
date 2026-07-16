@@ -94,6 +94,14 @@ class Job(Base):
     budget_usd: Mapped[float] = mapped_column(Float, default=5.0)
     max_retries: Mapped[int] = mapped_column(Integer, default=2)
 
+    # Quality gate: every finished run is scored 0..1; scoring below the
+    # threshold raises an alert, and on_low_score="pause" also pauses the
+    # schedule. threshold=None disables the gate (runs are still scored).
+    score_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    on_low_score: Mapped[str] = mapped_column(String(20), default="alert")
+    # Scorer configuration, e.g. {"judge": {"enabled": true, "model": "..."}}.
+    scorers: Mapped[dict] = mapped_column(JSON, default=dict)
+
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
     runs: Mapped[list["Run"]] = relationship(back_populates="job", cascade="all, delete-orphan")
@@ -132,6 +140,9 @@ class Run(Base):
     steps: Mapped[list["RunStep"]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="RunStep.index"
     )
+    scores: Mapped[list["ScoreRecord"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
 
 
 class RunStep(Base):
@@ -158,3 +169,33 @@ class RunStep(Base):
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
 
     run: Mapped[Run] = relationship(back_populates="steps")
+
+
+class ScoreRecord(Base):
+    """One scorer's verdict on a finished run (Run.score holds the overall)."""
+
+    __tablename__ = "score_records"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id"), index=True)
+    scorer: Mapped[str] = mapped_column(String(50))
+    score: Mapped[float] = mapped_column(Float)
+    passed: Mapped[bool] = mapped_column(Boolean)
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+    run: Mapped[Run] = relationship(back_populates="scores")
+
+
+class Alert(Base):
+    """Something a human should look at: low score, exhausted retries, auto-pause."""
+
+    __tablename__ = "alerts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(30))  # low_score | run_failed | auto_paused
+    message: Mapped[str] = mapped_column(Text)
+    acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)

@@ -18,7 +18,9 @@ from datetime import datetime, timezone
 from ..config import settings
 from ..db import get_session
 from ..engine import BudgetExceeded, RunContext, get_engine
-from ..models import Run, RunStatus
+from ..eval import score_run
+from ..eval.notify import raise_alert
+from ..models import Run, RunStatus, ScoreRecord
 from .queue import claim_next_run, enqueue_due_jobs
 
 log = logging.getLogger(__name__)
@@ -55,6 +57,7 @@ def execute_run(run_id: str) -> RunStatus:
             ctx.cancelled.set()
             thread.join(timeout=GRACE_PERIOD_S)
             _finish(session, run, RunStatus.TIMED_OUT, error=f"exceeded timeout of {job.timeout_s}s")
+            _score_and_gate(session, run)
             return RunStatus.TIMED_OUT
 
         error = outcome.get("error")
@@ -62,15 +65,27 @@ def execute_run(run_id: str) -> RunStatus:
             result = outcome["result"]
             run.result = {"summary": result.summary, **result.data}
             _finish(session, run, RunStatus.SUCCEEDED)
+            _score_and_gate(session, run)
             return RunStatus.SUCCEEDED
 
         if isinstance(error, BudgetExceeded):
             _finish(session, run, RunStatus.BUDGET_EXCEEDED, error=str(error))
+            _score_and_gate(session, run)
             return RunStatus.BUDGET_EXCEEDED
 
         detail = "".join(traceback.format_exception(error)).strip()
         _finish(session, run, RunStatus.FAILED, error=detail)
-        _maybe_retry(session, run)
+        if not _maybe_retry(session, run):
+            # Final failure — no retry pending, so this is what a human sees.
+            raise_alert(
+                session,
+                job.id,
+                kind="run_failed",
+                message=f"job '{job.name}' failed after {run.attempt} attempt(s): "
+                + (run.error or "").splitlines()[-1][:300],
+                run_id=run.id,
+            )
+            _score_and_gate(session, run)
         return RunStatus.FAILED
     finally:
         session.close()
@@ -84,12 +99,12 @@ def _finish(session, run: Run, status: RunStatus, error: str | None = None) -> N
     log.info("run %s finished: %s", run.id, status.value)
 
 
-def _maybe_retry(session, run: Run) -> None:
+def _maybe_retry(session, run: Run) -> bool:
     """Non-deterministic failure: schedule a fresh attempt with context."""
     job = run.job
     if run.attempt > job.max_retries:
         log.warning("run %s exhausted retries (%d)", run.id, job.max_retries)
-        return
+        return False
     retry = Run(
         job_id=job.id,
         status=RunStatus.QUEUED,
@@ -100,6 +115,52 @@ def _maybe_retry(session, run: Run) -> None:
     session.add(retry)
     session.commit()
     log.info("scheduled retry %s (attempt %d) for run %s", retry.id, retry.attempt, run.id)
+    return True
+
+
+def _score_and_gate(session, run: Run) -> None:
+    """Quality gate: score the finished run; alert / pause below threshold.
+
+    This is the unattended-agent safety net — nobody watches each run, so
+    the platform does. Scoring failures must never take the worker down.
+    """
+    job = run.job
+    try:
+        overall, results = score_run(run, session, job.scorers or {})
+    except Exception:  # noqa: BLE001
+        log.exception("scoring crashed for run %s", run.id)
+        return
+
+    run.score = overall
+    for r in results:
+        session.add(
+            ScoreRecord(run_id=run.id, scorer=r.scorer, score=r.score, passed=r.passed, detail=r.detail)
+        )
+    session.commit()
+    log.info("run %s scored %.3f (%s)", run.id, overall, ", ".join(f"{r.scorer}={r.score:.2f}" for r in results))
+
+    threshold = job.score_threshold
+    if threshold is None or overall >= threshold:
+        return
+
+    raise_alert(
+        session,
+        job.id,
+        kind="low_score",
+        message=f"job '{job.name}' scored {overall:.2f}, below threshold {threshold:.2f}",
+        run_id=run.id,
+    )
+    if job.on_low_score == "pause":
+        job.paused = True
+        session.commit()
+        raise_alert(
+            session,
+            job.id,
+            kind="auto_paused",
+            message=f"job '{job.name}' auto-paused by quality gate (score {overall:.2f} < {threshold:.2f})",
+            run_id=run.id,
+        )
+        log.warning("job %s auto-paused by quality gate", job.name)
 
 
 def worker_loop(stop: threading.Event | None = None) -> None:

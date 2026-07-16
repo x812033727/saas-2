@@ -24,5 +24,8 @@ class Settings(BaseSettings):
     # Path to a Ti checkout for the TiEngine adapter (optional).
     ti_path: str | None = None
 
+    # Alert webhook (generic JSON POST, Slack incoming-webhook compatible).
+    webhook_url: str | None = None
+
 
 settings = Settings()

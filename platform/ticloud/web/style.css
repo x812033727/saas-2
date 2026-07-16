@@ -54,6 +54,19 @@ body {
 }
 .brand { color: var(--ink); text-decoration: none; font-size: 17px; }
 .tagline { color: var(--muted); font-size: 13px; }
+.alerts-link { margin-left: auto; color: var(--ink-2); text-decoration: none; font-size: 14px; }
+.alerts-link:hover { color: var(--series-1); }
+.alert-count {
+  display: inline-block;
+  min-width: 18px;
+  text-align: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--critical);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
 
 main { max-width: 1080px; margin: 0 auto; padding: 24px; }
 
@@ -155,6 +168,22 @@ details.panel summary { cursor: pointer; color: var(--series-1); font-size: 14px
 .spark .pt { fill: var(--series-1); stroke: var(--surface); stroke-width: 2; }
 .spark .hit { fill: transparent; }
 .spark .hit:hover + .pt, .spark .pt:hover { r: 5; }
+.spark .threshold { stroke: var(--serious); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.spark .threshold-label { fill: var(--muted); font-size: 10px; }
+
+/* Scorer breakdown rows */
+.scorecard { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--grid); }
+.scorecard:last-child { border-bottom: none; }
+.scorecard .verdict { flex: none; width: 22px; text-align: center; font-weight: 700; }
+.scorecard .verdict.pass { color: var(--good-text); }
+.scorecard .verdict.fail { color: var(--critical); }
+.scorecard .sname { flex: none; width: 110px; font-weight: 600; }
+.scorecard .bar { flex: 1; height: 8px; border-radius: 4px; background: var(--grid); overflow: hidden; }
+.scorecard .bar > i { display: block; height: 100%; background: var(--series-1); }
+.scorecard .sval { flex: none; width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+.scorecard details { font-size: 12px; }
+.scorecard summary { cursor: pointer; color: var(--muted); }
+.scorecard pre { background: var(--page); border: 1px solid var(--grid); border-radius: 6px; padding: 8px; overflow-x: auto; max-width: 480px; white-space: pre-wrap; }
 
 /* Trace steps */
 .step { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--grid); }
