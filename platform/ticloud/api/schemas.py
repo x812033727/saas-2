@@ -85,3 +85,17 @@ class RunOut(BaseModel):
 
 class RunDetailOut(RunOut):
     steps: list[RunStepOut]
+
+
+class JobWithLastRun(JobOut):
+    last_run: RunOut | None = None
+
+
+class RunStatPoint(BaseModel):
+    """Lightweight per-run point for trend sparklines (drift precursor)."""
+
+    run_id: str
+    status: str
+    cost_usd: float
+    duration_s: float | None
+    scheduled_at: datetime

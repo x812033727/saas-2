@@ -33,6 +33,10 @@ def execute_run(run_id: str) -> RunStatus:
     try:
         run = session.get(Run, run_id)
         job = run.job
+        if run.status != RunStatus.RUNNING:  # direct execution without a claim
+            run.status = RunStatus.RUNNING
+            run.started_at = datetime.now(timezone.utc)
+            session.commit()
         ctx = RunContext(session, run, budget_usd=job.budget_usd)
 
         outcome: dict = {}

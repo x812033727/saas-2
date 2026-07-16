@@ -30,6 +30,11 @@ uvicorn ticloud.api.main:app --reload &        # API on :8000
 python -m ticloud.scheduler.worker             # scheduler + executor
 ```
 
+Then open the dashboard at **http://localhost:8000/ui/** — jobs overview
+with live status badges, per-job cost trend, and a step-by-step trace for
+every run (role, cost, tokens, timing), refreshing live while a run is
+in flight.
+
 Create a nightly patrol job (the `offline` engine simulates a full Ti
 workshop with no API keys — swap to `ti` for the real engine):
 
@@ -53,6 +58,7 @@ platform/ticloud/
   scheduler/   cron computation, DB-backed queue (SKIP LOCKED), worker loop
   engine/      AgentEngine protocol, offline demo engine, Ti adapter
   api/         FastAPI management API (jobs, runs, trigger, pause/resume)
+  web/         no-build dashboard (jobs, run history, live trace) at /ui/
   models.py    Job / Run / RunStep (structured trace)
 deploy/        Dockerfile + docker-compose (Postgres + API + worker)
 docs/PLAN.md   Product & roadmap plan (zh-TW)
