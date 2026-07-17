@@ -9,6 +9,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -139,7 +140,8 @@ class Job(Base):
     # a job with neither is manual-trigger-only.
     cron: Mapped[str | None] = mapped_column(String(100), nullable=True)
     interval_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    next_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    # Indexed: the scheduler tick selects due jobs by next_run_at every tick.
+    next_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True, index=True)
     paused: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Per-run guards (agent-native reliability semantics).
@@ -164,9 +166,13 @@ class Run(Base):
     """One execution of a job (scheduled or manually triggered)."""
 
     __tablename__ = "runs"
+    # Composite covers both job-scoped listing (ORDER BY scheduled_at) and the
+    # month-to-date spend filter; its job_id prefix serves job_id-only lookups
+    # too, so a separate job_id index is redundant.
+    __table_args__ = (Index("ix_runs_job_scheduled", "job_id", "scheduled_at"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"))
     status: Mapped[RunStatus] = mapped_column(
         Enum(RunStatus, values_callable=lambda e: [m.value for m in e]),
         default=RunStatus.QUEUED,
