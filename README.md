@@ -1,7 +1,13 @@
 # Ti Cloud
 
+[![CI](https://github.com/x812033727/saas-2/actions/workflows/ci.yml/badge.svg)](https://github.com/x812033727/saas-2/actions/workflows/ci.yml)
+[![Eval gate](https://github.com/x812033727/saas-2/actions/workflows/eval-gate.yml/badge.svg)](https://github.com/x812033727/saas-2/actions/workflows/eval-gate.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 **An autonomous AI dev team on a schedule** — it patrols your repos, ships
 quality-gated PRs, and never forgets what it learned.
+
+![Demo tour](docs/screenshots/demo.gif)
 
 ## Why
 
@@ -77,7 +83,7 @@ docker compose -f deploy/docker-compose.yml up
 
 # Or local dev (SQLite, zero config):
 pip install -e "platform[dev]"
-uvicorn ticloud.api.main:app --reload &        # API + dashboard on :8000
+uvicorn ticloud.api.main:app --reload &        # API + dashboard on :8000/ui/
 python -m ticloud.scheduler.worker &           # scheduler + executor
 python -m ticloud.demo                         # seed the showcase jobs
 ```
@@ -105,6 +111,38 @@ curl -X POST localhost:8000/jobs -H 'content-type: application/json' -d '{
   "on_low_score": "pause"
 }'
 ```
+
+## Running the flagship Ti engine
+
+The Ti adapter drives a real [Ti](https://github.com/x812033727/Ti)
+multi-expert workshop (PM / engineer / senior / QA collaborating on a real
+repo) as a scheduled job. Point the platform at a Ti checkout and give the
+job a repo and a brief:
+
+```bash
+export TICLOUD_TI_PATH=/path/to/Ti   # a checkout with its own .venv
+
+curl -X POST localhost:8000/jobs -H 'content-type: application/json' -d '{
+  "name": "nightly-repo-patrol",
+  "engine": "ti",
+  "cron": "30 3 * * *",
+  "timeout_s": 5400,
+  "budget_usd": 5.0,
+  "score_threshold": 0.6,
+  "payload": {
+    "repo_url": "https://github.com/you/your-repo",
+    "publish_repo": "you/your-repo",
+    "brief": "Patrol the repo: find one worthwhile bug or improvement, fix it with tests, and open a PR."
+  }
+}'
+```
+
+The workshop runs headlessly in a subprocess using Ti's own interpreter
+(dependencies stay isolated), streams its stages, critic verdicts, and
+token/cost usage into the run trace, and reports the PR it opened in the
+run result. Budget, timeout, retry-with-failure-context, scoring, and the
+knowledge flywheel (job lessons are folded into the workshop brief; every
+failure becomes a lesson) all apply — same as any other engine.
 
 ## Hosted / multi-tenant mode
 
@@ -146,16 +184,12 @@ docs/PLAN.md   product plan & roadmap (zh-TW); docs/LAUNCH.md launch notes
 ## Tests
 
 ```bash
-cd platform && python -m pytest      # 58 tests
+cd platform && python -m pytest
 python -m ticloud.eval.cli run       # eval-set regression gate
 ```
 
 ## Roadmap
 
-- **Ti engine adapter** — drive the [Ti](https://github.com/x812033727/Ti)
-  multi-expert workshop (PM / engineer / senior / QA collaborating on real
-  repos) as the flagship engine; the `AgentEngine` protocol means any
-  agent can plug in.
 - **Semantic failure clustering** — embedding-based grouping on top of the
   deterministic signatures (cloud tier).
 - **Multi-tenancy + hosted cloud** — managed schedules, team workspaces,

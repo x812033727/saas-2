@@ -70,14 +70,18 @@ def test_limit_validation_for_runs_stats_and_alerts(client):
         (f"/jobs/{job['id']}/runs", 201, 422),
         (f"/jobs/{job['id']}/runs", 1, 200),
         (f"/jobs/{job['id']}/stats", -1, 422),
+        (f"/jobs/{job['id']}/stats", 0, 422),
         (f"/jobs/{job['id']}/stats", 101, 422),
         (f"/jobs/{job['id']}/stats", 1, 200),
+        ("/alerts", -1, 422),
         ("/alerts", 0, 422),
         ("/alerts", 501, 422),
         ("/alerts", 1, 200),
     ]
-    for path, limit, expected in cases:
-        assert client.get(path, params={"limit": limit}).status_code == expected, (path, limit)
+
+    for path, limit, expected_status in cases:
+        resp = client.get(path, params={"limit": limit})
+        assert resp.status_code == expected_status, (path, limit, resp.text)
 
 
 def test_missing_resources_404(client):
