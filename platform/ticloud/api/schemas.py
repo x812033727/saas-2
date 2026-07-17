@@ -202,9 +202,15 @@ class TenantCreate(BaseModel):
 class TenantOut(BaseModel):
     id: str
     name: str
+    monthly_budget_usd: float | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TenantBudget(BaseModel):
+    # None clears the cap (unlimited).
+    monthly_budget_usd: float | None = Field(default=None, ge=0)
 
 
 class ApiKeyCreate(BaseModel):
@@ -240,3 +246,6 @@ class UsagePoint(BaseModel):
 class UsageOut(BaseModel):
     tenant_id: str | None
     months: list[UsagePoint]
+    monthly_budget_usd: float | None = None
+    current_month_cost_usd: float = 0.0
+    over_budget: bool = False

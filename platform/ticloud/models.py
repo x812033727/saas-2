@@ -80,6 +80,9 @@ class Tenant(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(200), unique=True)
+    # Calendar-month spend cap (USD) across the tenant's jobs; None = unlimited.
+    # At/over the cap, new runs are refused (manual) or skipped (scheduled).
+    monthly_budget_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(
@@ -121,6 +124,7 @@ class Job(Base):
     tenant_id: Mapped[str | None] = mapped_column(
         ForeignKey("tenants.id"), nullable=True, index=True
     )
+    tenant: Mapped[Tenant | None] = relationship()
     engine: Mapped[str] = mapped_column(String(50), default="offline")
     # Engine-specific payload (e.g. repo URL, task brief for a Ti workshop).
     payload: Mapped[dict] = mapped_column(JSON, default=dict)

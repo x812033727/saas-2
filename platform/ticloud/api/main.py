@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import __version__
+from ..billing import month_to_date_cost, tenant_over_budget
 from ..db import SessionLocal, init_db
 from ..eval.failures import cluster_failures
 from ..models import Alert, ApiKey, EvalCase, Job, Lesson, Run, RunStatus, Tenant
@@ -30,6 +31,7 @@ from .schemas import (
     RunDetailOut,
     RunOut,
     RunStatPoint,
+    TenantBudget,
     TenantCreate,
     TenantOut,
     UsageOut,
@@ -166,7 +168,12 @@ def trigger_job(
     tenant: Tenant | None = Depends(current_tenant),
 ) -> Run:
     """Fire a job immediately, outside its schedule."""
-    return enqueue_manual(session, _get_job(session, job_id, tenant))
+    job = _get_job(session, job_id, tenant)
+    if tenant is not None and tenant_over_budget(session, tenant):
+        raise HTTPException(
+            402, f"tenant monthly budget (${tenant.monthly_budget_usd:.2f}) reached"
+        )
+    return enqueue_manual(session, job)
 
 
 @app.post("/jobs/{job_id}/pause", response_model=JobOut)
@@ -445,9 +452,13 @@ def usage(
     single-tenant mode). Judge spend is deliberately excluded — it lives in
     score details, separate from agent spend."""
     job_ids = _tenant_job_ids(session, tenant) if tenant is not None else None
+    budget = tenant.monthly_budget_usd if tenant is not None else None
     return UsageOut(
         tenant_id=tenant.id if tenant is not None else None,
         months=_usage_months(session, job_ids),
+        monthly_budget_usd=budget,
+        current_month_cost_usd=month_to_date_cost(session, job_ids) if job_ids is not None else 0.0,
+        over_budget=tenant_over_budget(session, tenant) if tenant is not None else False,
     )
 
 
@@ -475,6 +486,17 @@ def _get_tenant(session: Session, tenant_id: str) -> Tenant:
     tenant = session.get(Tenant, tenant_id)
     if tenant is None:
         raise HTTPException(404, "tenant not found")
+    return tenant
+
+
+@admin.put("/tenants/{tenant_id}/budget", response_model=TenantOut)
+def set_tenant_budget(
+    tenant_id: str, body: TenantBudget, session: Session = Depends(db)
+) -> Tenant:
+    """Set (or clear, with null) a tenant's monthly spend cap."""
+    tenant = _get_tenant(session, tenant_id)
+    tenant.monthly_budget_usd = body.monthly_budget_usd
+    session.commit()
     return tenant
 
 

@@ -24,11 +24,17 @@ def _ensure_new_columns() -> None:
     from sqlalchemy import inspect, text
 
     inspector = inspect(engine)
-    if "jobs" in inspector.get_table_names():
+    tables = set(inspector.get_table_names())
+    if "jobs" in tables:
         columns = {c["name"] for c in inspector.get_columns("jobs")}
         if "tenant_id" not in columns:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE jobs ADD COLUMN tenant_id VARCHAR(32)"))
+    if "tenants" in tables:
+        columns = {c["name"] for c in inspector.get_columns("tenants")}
+        if "monthly_budget_usd" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE tenants ADD COLUMN monthly_budget_usd FLOAT"))
 
 
 def get_session() -> Session:
