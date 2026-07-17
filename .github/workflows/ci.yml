@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e "platform[dev]"
+      - name: Frontend syntax
+        run: node --check platform/ticloud/web/app.js
+      - name: Unit + integration tests
+        run: cd platform && python -m pytest -q
+      - name: Demo seed smoke test
+        env:
+          TICLOUD_DATABASE_URL: sqlite:///./ci-demo.db
+        run: |
+          python -m ticloud.demo
+          python -m ticloud.demo   # idempotency
+          python - <<'PY'
+          from ticloud.db import get_session
+          from ticloud.models import Alert, Job, Lesson
+          s = get_session()
+          jobs = {j.name: j for j in s.query(Job).all()}
+          assert set(jobs) == {"nightly-patrol", "dep-upgrade", "long-audit"}, set(jobs)
+          assert jobs["dep-upgrade"].paused, "quality gate should have paused dep-upgrade"
+          assert s.query(Lesson).count() > 0, "flywheel should have recorded lessons"
+          assert s.query(Alert).count() > 0, "gate should have raised alerts"
+          print("demo smoke OK")
+          PY
