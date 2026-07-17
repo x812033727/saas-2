@@ -74,6 +74,23 @@ class JobUpdate(BaseModel):
         return v
 
 
+class TemplateOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    engine: str
+    cron: str | None = None
+    interval_seconds: int | None = None
+    payload: dict
+    required_payload: list[str] = Field(default_factory=list)
+
+
+class TemplateInstantiate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    cron: str | None = None  # overrides the template schedule
+    payload: dict = Field(default_factory=dict)  # merged over the template payload
+
+
 class JobOut(BaseModel):
     id: str
     name: str

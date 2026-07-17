@@ -9,8 +9,9 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import stripe_billing
+from pydantic import ValidationError as PydanticValidationError
 
+from .. import stripe_billing, templates
 from .. import __version__
 from ..billing import month_to_date_cost, runs_since_filter, tenant_over_budget
 from ..db import SessionLocal, init_db
@@ -46,6 +47,8 @@ from .schemas import (
     RunDetailOut,
     RunOut,
     RunStatPoint,
+    TemplateInstantiate,
+    TemplateOut,
     TenantBudget,
     TenantCreate,
     TenantPlan,
@@ -157,12 +160,7 @@ def overview(
     return out
 
 
-@app.post("/jobs", response_model=JobOut, status_code=201)
-def create_job(
-    body: JobCreate,
-    session: Session = Depends(db),
-    tenant: Tenant | None = Depends(current_tenant),
-) -> Job:
+def _persist_new_job(session: Session, tenant: Tenant | None, body: JobCreate) -> Job:
     # Uniqueness is per tenant (NULL tenant = the single self-host namespace),
     # so one tenant's job names neither block nor leak to another's.
     tenant_id = tenant.id if tenant is not None else None
@@ -175,6 +173,45 @@ def create_job(
     session.add(job)
     session.commit()
     return job
+
+
+@app.post("/jobs", response_model=JobOut, status_code=201)
+def create_job(
+    body: JobCreate,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> Job:
+    return _persist_new_job(session, tenant, body)
+
+
+@app.get("/templates", response_model=list[TemplateOut])
+def list_templates() -> list[dict]:
+    """Flagship job presets — the one-call path to a repo patrol / dependency
+    upgrade / CI babysitter (or an offline demo). Not tenant-scoped."""
+    return templates.TEMPLATES
+
+
+@app.post("/jobs/from-template/{template_id}", response_model=JobOut, status_code=201)
+def create_from_template(
+    template_id: str,
+    body: TemplateInstantiate,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> Job:
+    """Create a job from a template, merging in the caller's name, optional
+    cron override, and payload (e.g. the repo URL)."""
+    template = templates.get_template(template_id)
+    if template is None:
+        raise HTTPException(404, "template not found")
+    fields = templates.build_job_fields(template, body.name, body.cron, body.payload)
+    missing = templates.missing_required(template, fields["payload"])
+    if missing:
+        raise HTTPException(422, f"template {template_id!r} requires payload keys: {missing}")
+    try:
+        job_create = JobCreate(**fields)  # reuse engine/cron/action validation
+    except PydanticValidationError as e:
+        raise HTTPException(422, e.errors(include_url=False))
+    return _persist_new_job(session, tenant, job_create)
 
 
 @app.get("/jobs", response_model=list[JobOut])
