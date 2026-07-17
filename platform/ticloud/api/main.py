@@ -1,11 +1,14 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from .. import stripe_billing
 
 from .. import __version__
 from ..billing import month_to_date_cost, tenant_over_budget
@@ -33,6 +36,7 @@ from .schemas import (
     RunStatPoint,
     TenantBudget,
     TenantCreate,
+    TenantPlan,
     TenantOut,
     UsageOut,
     UsagePoint,
@@ -65,11 +69,31 @@ def db() -> Session:
 # ("required") mode. Every data route below scopes its queries when a tenant
 # is present, so cross-tenant reads consistently 404.
 current_tenant = make_current_tenant(db)
+log = logging.getLogger(__name__)
 
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "version": __version__}
+
+
+@app.post("/billing/stripe/webhook", include_in_schema=False)
+async def stripe_webhook(request: Request, session: Session = Depends(db)) -> dict:
+    """Stripe subscription webhook: syncs each tenant's plan → spend cap.
+
+    No API key — Stripe authenticates via the signature header (verified when
+    TICLOUD_STRIPE_WEBHOOK_SECRET is set). Always 200s on well-formed events
+    so Stripe doesn't retry a delivered-but-ignored event forever."""
+    payload = await request.body()
+    try:
+        event = stripe_billing.parse_event(payload, request.headers.get("stripe-signature"))
+    except stripe_billing.SignatureError:
+        raise HTTPException(400, "invalid stripe signature")
+    except ValueError:
+        raise HTTPException(400, "malformed webhook payload")
+    result = stripe_billing.handle_event(session, event)
+    log.info("stripe webhook %s -> %s", event.get("type"), result)
+    return {"result": result}
 
 
 @app.get("/", include_in_schema=False)
@@ -493,9 +517,29 @@ def _get_tenant(session: Session, tenant_id: str) -> Tenant:
 def set_tenant_budget(
     tenant_id: str, body: TenantBudget, session: Session = Depends(db)
 ) -> Tenant:
-    """Set (or clear, with null) a tenant's monthly spend cap."""
+    """Set (or clear, with null) a tenant's monthly spend cap.
+
+    Stripe webhooks also set this from the plan; a manual override here wins
+    until the next subscription event re-derives it."""
     tenant = _get_tenant(session, tenant_id)
     tenant.monthly_budget_usd = body.monthly_budget_usd
+    session.commit()
+    return tenant
+
+
+@admin.put("/tenants/{tenant_id}/plan", response_model=TenantOut)
+def set_tenant_plan(
+    tenant_id: str, body: TenantPlan, session: Session = Depends(db)
+) -> Tenant:
+    """Manually set a tenant's plan (comp accounts / when not using Stripe).
+
+    Applies the plan's budget, same as a subscription event would."""
+    if body.plan not in stripe_billing.PLAN_BUDGETS:
+        raise HTTPException(
+            422, f"unknown plan {body.plan!r}; known: {sorted(stripe_billing.PLAN_BUDGETS)}"
+        )
+    tenant = _get_tenant(session, tenant_id)
+    stripe_billing.apply_plan(tenant, body.plan, "active")
     session.commit()
     return tenant
 

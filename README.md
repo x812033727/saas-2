@@ -176,6 +176,26 @@ one-time `quota_exceeded` alert. Per-run `budget_usd` still guards each
 individual run; the account cap is the monthly ceiling on top. `GET /usage`
 reports the cap, month-to-date spend, and an `over_budget` flag.
 
+### Stripe billing (optional)
+
+A **plan** is a named spend cap (`stripe_billing.PLAN_BUDGETS` —
+placeholders: `free` $5, `team` $200, `pro` unlimited; tune to your
+pricing). Stripe subscription webhooks keep each tenant's plan and cap in
+sync:
+
+```bash
+pip install -e "platform[billing]"          # the Stripe SDK
+export TICLOUD_STRIPE_WEBHOOK_SECRET=whsec_… # verifies webhook signatures
+```
+
+Point a Stripe webhook at `POST /billing/stripe/webhook`. On
+`checkout.session.completed` (with `client_reference_id` = tenant id and
+`metadata.plan`) the tenant is activated on that plan; subscription
+`updated`/`deleted` events move it between paid and free-tier caps. Without
+the webhook secret the endpoint parses events unverified — fine for local
+testing, not production. No Stripe account? Set a plan directly with
+`PUT /admin/tenants/{id}/plan` (`{"plan": "team"}`) for comp accounts.
+
 ## Layout
 
 ```
