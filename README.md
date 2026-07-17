@@ -1,7 +1,13 @@
 # Ti Cloud
 
+[![CI](https://github.com/x812033727/saas-2/actions/workflows/ci.yml/badge.svg)](https://github.com/x812033727/saas-2/actions/workflows/ci.yml)
+[![Eval gate](https://github.com/x812033727/saas-2/actions/workflows/eval-gate.yml/badge.svg)](https://github.com/x812033727/saas-2/actions/workflows/eval-gate.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 **An autonomous AI dev team on a schedule** — it patrols your repos, ships
 quality-gated PRs, and never forgets what it learned.
+
+![Demo tour](docs/screenshots/demo.gif)
 
 ## Why
 
