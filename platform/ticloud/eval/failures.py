@@ -58,8 +58,17 @@ class FailureMode:
     latest_run_id: str | None = None
 
 
-def cluster_failures(session: Session, job_id: str | None = None, limit_runs: int = 500) -> list[FailureMode]:
-    """Group terminal failed runs by error signature, most frequent first."""
+def cluster_failures(
+    session: Session,
+    job_id: str | None = None,
+    limit_runs: int = 500,
+    job_ids: list[str] | None = None,
+) -> list[FailureMode]:
+    """Group terminal failed runs by error signature, most frequent first.
+
+    job_ids restricts clustering to those jobs (hosted mode: one tenant's
+    jobs), so a signature shared across tenants never leaks foreign runs.
+    """
     stmt = (
         select(Run)
         .where(Run.status.in_(FAILURE_STATUSES))
@@ -68,6 +77,8 @@ def cluster_failures(session: Session, job_id: str | None = None, limit_runs: in
     )
     if job_id:
         stmt = stmt.where(Run.job_id == job_id)
+    if job_ids is not None:
+        stmt = stmt.where(Run.job_id.in_(job_ids))
 
     modes: dict[str, FailureMode] = {}
     for run in session.scalars(stmt):

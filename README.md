@@ -144,6 +144,29 @@ run result. Budget, timeout, retry-with-failure-context, scoring, and the
 knowledge flywheel (job lessons are folded into the workshop brief; every
 failure becomes a lesson) all apply — same as any other engine.
 
+## Hosted / multi-tenant mode
+
+Self-hosting stays zero-config and single-tenant. To run Ti Cloud for
+multiple teams, flip on hosted mode:
+
+```bash
+export TICLOUD_AUTH_MODE=required          # every data route needs a key
+export TICLOUD_ADMIN_TOKEN=<random secret> # enables the /admin surface
+
+# provision a tenant and a key (shown once):
+curl -X POST localhost:8000/admin/tenants -H "authorization: Bearer $TICLOUD_ADMIN_TOKEN" \
+     -H 'content-type: application/json' -d '{"name": "acme"}'
+curl -X POST localhost:8000/admin/tenants/<id>/keys -H "authorization: Bearer $TICLOUD_ADMIN_TOKEN" \
+     -H 'content-type: application/json' -d '{"name": "ci"}'
+```
+
+Clients send `Authorization: Bearer tck_…` (the dashboard prompts for it on
+first 401 and remembers it). Each tenant sees only its own jobs, runs,
+alerts, failure modes, and eval cases; `GET /usage` returns the tenant's
+monthly run/cost/token totals and `GET /admin/usage` is the cross-tenant
+billing export. Keys are stored hashed and revocable
+(`POST /admin/keys/{id}/revoke`).
+
 ## Layout
 
 ```
@@ -161,7 +184,7 @@ docs/PLAN.md   product plan & roadmap (zh-TW); docs/LAUNCH.md launch notes
 ## Tests
 
 ```bash
-cd platform && python -m pytest      # 55 tests
+cd platform && python -m pytest
 python -m ticloud.eval.cli run       # eval-set regression gate
 ```
 

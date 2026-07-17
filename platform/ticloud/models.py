@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     TypeDecorator,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -71,13 +72,55 @@ TERMINAL_STATUSES = {
 }
 
 
+class Tenant(Base):
+    """A paying customer / team in hosted mode. In the default single-tenant
+    self-host mode no tenants exist and jobs stay unowned (tenant_id NULL)."""
+
+    __tablename__ = "tenants"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+    api_keys: Mapped[list["ApiKey"]] = relationship(
+        back_populates="tenant", cascade="all, delete-orphan"
+    )
+
+
+class ApiKey(Base):
+    """A bearer credential for a tenant. Only the SHA-256 of the secret is
+    stored; the secret itself is shown once at creation."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id"))
+    name: Mapped[str] = mapped_column(String(200), default="default")
+    # First characters of the secret, for identifying a key without the secret.
+    prefix: Mapped[str] = mapped_column(String(16))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+
+    tenant: Mapped[Tenant] = relationship(back_populates="api_keys")
+
+
 class Job(Base):
     """A scheduled agent job: what to run, when, and under what guards."""
 
     __tablename__ = "jobs"
+    # Names are unique per tenant, not globally — two tenants may both own a
+    # "daily-sync". NULL tenant (self-host mode) uniqueness is enforced at the
+    # API layer, since SQL treats NULLs as distinct in unique constraints.
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_jobs_tenant_name"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
+    name: Mapped[str] = mapped_column(String(200))
+    # Owning tenant in hosted mode; NULL in single-tenant self-host mode.
+    tenant_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tenants.id"), nullable=True, index=True
+    )
     engine: Mapped[str] = mapped_column(String(50), default="offline")
     # Engine-specific payload (e.g. repo URL, task brief for a Ti workshop).
     payload: Mapped[dict] = mapped_column(JSON, default=dict)

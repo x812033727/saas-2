@@ -10,10 +10,18 @@ const esc = (s) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 async function api(path, opts = {}) {
-  const resp = await fetch(path, {
-    headers: { "content-type": "application/json" },
-    ...opts,
-  });
+  // Hosted mode: attach the tenant API key; on 401 ask for one and retry.
+  const headers = { "content-type": "application/json" };
+  const key = localStorage.getItem("ticloud_api_key");
+  if (key) headers["authorization"] = `Bearer ${key}`;
+  const resp = await fetch(path, { headers, ...opts });
+  if (resp.status === 401) {
+    const entered = prompt("Ti Cloud API key (tck_…):", key || "");
+    if (entered && entered !== key) {
+      localStorage.setItem("ticloud_api_key", entered.trim());
+      return api(path, opts);
+    }
+  }
   if (!resp.ok) {
     let detail = resp.statusText;
     try { detail = JSON.stringify((await resp.json()).detail); } catch {}

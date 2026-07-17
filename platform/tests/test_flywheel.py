@@ -93,7 +93,7 @@ def test_promote_failure_mode_to_eval_case(client):
     sig = modes[0]["signature"]
 
     case = client.post("/failure-modes/promote", json={"signature": sig}).json()
-    assert case["name"] == f"regression-{sig}"
+    assert case["name"] == f"regression-{job['id'][:8]}-{sig}"
     assert case["payload"] == {"fail_at": 2}  # inherits the failing payload
     assert case["source_signature"] == sig
 

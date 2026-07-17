@@ -193,3 +193,50 @@ class AlertOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TenantCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class TenantOut(BaseModel):
+    id: str
+    name: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(default="default", min_length=1, max_length=200)
+
+
+class ApiKeyOut(BaseModel):
+    id: str
+    tenant_id: str
+    name: str
+    prefix: str
+    created_at: datetime
+    revoked_at: datetime | None
+    last_used_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class ApiKeyCreated(ApiKeyOut):
+    # The full secret — returned exactly once, at creation.
+    secret: str
+
+
+class UsagePoint(BaseModel):
+    month: str  # "YYYY-MM"
+    runs: int
+    succeeded: int
+    cost_usd: float
+    tokens_in: int
+    tokens_out: int
+
+
+class UsageOut(BaseModel):
+    tenant_id: str | None
+    months: list[UsagePoint]

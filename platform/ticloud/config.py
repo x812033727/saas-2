@@ -27,5 +27,13 @@ class Settings(BaseSettings):
     # Alert webhook (generic JSON POST, Slack incoming-webhook compatible).
     webhook_url: str | None = None
 
+    # Multi-tenant hosted mode: "off" (default, single-tenant self-host —
+    # no auth, jobs unowned) or "required" (every data route needs a tenant
+    # API key and sees only that tenant's jobs/runs/alerts).
+    auth_mode: str = "off"
+    # Bearer token for the /admin surface (tenant + API-key management,
+    # cross-tenant usage). Admin routes are disabled while unset.
+    admin_token: str | None = None
+
 
 settings = Settings()
