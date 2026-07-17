@@ -1,10 +1,12 @@
+import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -584,6 +586,64 @@ def get_run(
     tenant: Tenant | None = Depends(current_tenant),
 ) -> Run:
     return _get_run(session, run_id, tenant)
+
+
+def _step_event(step: RunStep) -> str:
+    data = {
+        "index": step.index,
+        "role": step.role,
+        "kind": step.kind,
+        "name": step.name,
+        "started_at": step.started_at.isoformat() if step.started_at else None,
+        "finished_at": step.finished_at.isoformat() if step.finished_at else None,
+        "input": step.input,
+        "output": step.output,
+        "cost_usd": step.cost_usd,
+        "tokens_in": step.tokens_in,
+        "tokens_out": step.tokens_out,
+    }
+    return f"event: step\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+# Safety cap so a stuck-RUNNING run can't hold an SSE connection forever.
+_SSE_MAX_POLLS = 3600
+
+
+@app.get("/runs/{run_id}/events", include_in_schema=False)
+def run_events(
+    run_id: str,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> StreamingResponse:
+    """Server-Sent Events: stream a run's trace steps as they're written, so
+    the UI shows the workshop grow live without polling. Emits already-written
+    steps immediately, then tails new ones until the run reaches a terminal
+    status (a final `done` event), then closes."""
+    _get_run(session, run_id, tenant)  # authz + existence up front
+
+    async def gen():
+        last_index = -1
+        for _ in range(_SSE_MAX_POLLS):
+            s = SessionLocal()  # fresh session each poll to see the worker's commits
+            try:
+                run = s.get(Run, run_id)
+                if run is None:
+                    return
+                for step in s.scalars(
+                    select(RunStep)
+                    .where(RunStep.run_id == run_id, RunStep.index > last_index)
+                    .order_by(RunStep.index)
+                ):
+                    last_index = step.index
+                    yield _step_event(step)
+                if run.status in TERMINAL_STATUSES:
+                    yield f"event: done\ndata: {json.dumps({'status': run.status.value})}\n\n"
+                    return
+            finally:
+                s.close()
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.post("/runs/{run_id}/cancel", response_model=RunOut)

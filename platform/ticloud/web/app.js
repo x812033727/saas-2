@@ -219,21 +219,23 @@ async function jobDetailView(id) {
     </div>`;
 }
 
-async function runDetailView(id) {
-  const run = await api(`/runs/${id}`);
-  const lessons = await api(`/jobs/${run.job_id}/lessons`).catch(() => []);
-  const steps = run.steps.map((s) => {
-    const roleClass = ["pm", "engineer", "qa", "team"].includes(s.role) ? s.role : "other";
-    const io = (s.input || s.output)
-      ? `<details><summary>i/o</summary><pre>${esc(JSON.stringify({ input: s.input, output: s.output }, null, 2))}</pre></details>`
-      : "";
-    return `
+function stepRow(s) {
+  const roleClass = ["pm", "engineer", "qa", "team"].includes(s.role) ? s.role : "other";
+  const io = (s.input || s.output)
+    ? `<details><summary>i/o</summary><pre>${esc(JSON.stringify({ input: s.input, output: s.output }, null, 2))}</pre></details>`
+    : "";
+  return `
       <div class="step">
         <span class="role ${roleClass}">${esc(s.role)}</span>
         <span class="name">${esc(s.name)} ${io}</span>
-        <span class="meta">${duration(s.started_at, s.finished_at)} · ${fmtMoney(s.cost_usd)} · ${s.tokens_in + s.tokens_out} tok</span>
+        <span class="meta">${duration(s.started_at, s.finished_at)} · ${fmtMoney(s.cost_usd)} · ${(s.tokens_in || 0) + (s.tokens_out || 0)} tok</span>
       </div>`;
-  }).join("");
+}
+
+async function runDetailView(id) {
+  const run = await api(`/runs/${id}`);
+  const lessons = await api(`/jobs/${run.job_id}/lessons`).catch(() => []);
+  const steps = run.steps.map(stepRow).join("");
 
   app.innerHTML = `
     <div class="crumb"><a href="#/jobs">Jobs</a> / <a href="#/jobs/${run.job_id}">job</a> / run ${esc(run.id.slice(0, 8))}</div>
@@ -264,10 +266,29 @@ async function runDetailView(id) {
       </div>`).join("")}</div>` : ""}
     ${run.error ? `<h2>Error</h2><div class="error-box">${esc(run.error)}</div>` : ""}
     <h2>Trace</h2>
-    <div class="card">${steps || '<div class="empty">no steps recorded yet</div>'}</div>`;
+    <div class="card" id="trace">${steps || '<div class="empty">no steps recorded yet</div>'}</div>`;
 
-  // Live trace: keep refreshing while the run is in flight.
-  if (run.status === "running" || run.status === "queued") schedulePoll(2000);
+  // Live trace: stream new steps over SSE while the run is in flight, so the
+  // workshop grows before your eyes. Falls back to polling if SSE fails
+  // (e.g. hosted mode, where EventSource can't send the API key).
+  const inFlight = run.status === "running" || run.status === "queued";
+  if (inFlight && window.EventSource) {
+    const trace = document.getElementById("trace");
+    const seen = new Set(run.steps.map((s) => s.index));
+    const es = new EventSource(`/runs/${id}/events`);
+    es.addEventListener("step", (ev) => {
+      const s = JSON.parse(ev.data);
+      if (seen.has(s.index)) return;
+      seen.add(s.index);
+      const empty = trace.querySelector(".empty");
+      if (empty) empty.remove();
+      trace.insertAdjacentHTML("beforeend", stepRow(s));
+    });
+    es.addEventListener("done", () => { es.close(); render(); });  // refresh scores/result/badge
+    es.onerror = () => { es.close(); schedulePoll(2000); };
+  } else if (inFlight) {
+    schedulePoll(2000);
+  }
 }
 
 async function alertsView() {
