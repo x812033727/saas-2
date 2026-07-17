@@ -112,6 +112,21 @@ curl -X POST localhost:8000/jobs -H 'content-type: application/json' -d '{
 }'
 ```
 
+## Job templates
+
+`GET /templates` lists ready-made presets; `POST /jobs/from-template/{id}`
+creates a job from one, merging your name + payload (e.g. the repo URL):
+
+```bash
+curl -X POST localhost:8000/jobs/from-template/nightly-repo-patrol \
+  -H 'content-type: application/json' \
+  -d '{"name": "patrol-my-repo", "payload": {"repo_url": "https://github.com/you/repo"}}'
+```
+
+Flagship templates: `nightly-repo-patrol`, `dependency-upgrade`,
+`ci-babysitter` (all Ti-engine, open PRs against your repo), plus
+`demo-workshop` (offline, zero setup).
+
 ## Running the flagship Ti engine
 
 The Ti adapter drives a real [Ti](https://github.com/x812033727/Ti)
