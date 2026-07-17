@@ -187,6 +187,45 @@ class ScoreRecord(Base):
     run: Mapped[Run] = relationship(back_populates="scores")
 
 
+class Lesson(Base):
+    """Knowledge flywheel: something a job learned that future runs consult.
+
+    Written by the worker on failures and by engines mid-run; read by
+    engines before they start work. Deduped per (job, title) — repeat
+    failures refresh the lesson instead of piling up duplicates.
+    """
+
+    __tablename__ = "lessons"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    content: Mapped[str] = mapped_column(Text)
+    source_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class EvalCase(Base):
+    """A regression test distilled from a production failure (or hand-made).
+
+    Replayed by the eval CLI: run the engine with this payload, score the
+    run, fail CI if the score drops below min_score.
+    """
+
+    __tablename__ = "eval_cases"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
+    engine: Mapped[str] = mapped_column(String(50), default="offline")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    min_score: Mapped[float] = mapped_column(Float, default=0.9)
+    source_signature: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
 class Alert(Base):
     """Something a human should look at: low score, exhausted retries, auto-pause."""
 

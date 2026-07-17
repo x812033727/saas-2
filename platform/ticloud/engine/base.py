@@ -12,9 +12,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol, runtime_checkable
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Run, RunStep
+from ..models import Lesson, Run, RunStep
 
 
 class BudgetExceeded(Exception):
@@ -104,6 +105,37 @@ class RunContext:
     def check_cancelled(self) -> None:
         if self.cancelled.is_set():
             raise TimeoutError("run cancelled (deadline reached)")
+
+    # --- knowledge flywheel -------------------------------------------------
+
+    def get_lessons(self, limit: int = 20) -> list[Lesson]:
+        """Lessons this job has accumulated — consult before starting work."""
+        return list(
+            self._session.scalars(
+                select(Lesson)
+                .where(Lesson.job_id == self._run.job_id)
+                .order_by(Lesson.updated_at.desc())
+                .limit(limit)
+            )
+        )
+
+    def record_lesson(self, title: str, content: str) -> Lesson:
+        """Persist a lesson for future runs. Same (job, title) updates in place."""
+        existing = self._session.scalar(
+            select(Lesson).where(Lesson.job_id == self._run.job_id, Lesson.title == title)
+        )
+        if existing is not None:
+            existing.content = content
+            existing.source_run_id = self._run.id
+            existing.updated_at = datetime.now(timezone.utc)
+            self._session.commit()
+            return existing
+        lesson = Lesson(
+            job_id=self._run.job_id, title=title, content=content, source_run_id=self._run.id
+        )
+        self._session.add(lesson)
+        self._session.commit()
+        return lesson
 
 
 @runtime_checkable

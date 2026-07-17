@@ -9,14 +9,20 @@ from sqlalchemy.orm import Session
 
 from .. import __version__
 from ..db import SessionLocal, init_db
-from ..models import Alert, Job, Run
+from ..eval.failures import cluster_failures
+from ..models import Alert, EvalCase, Job, Lesson, Run
 from ..scheduler.cron import compute_next_run
 from ..scheduler.queue import enqueue_manual
 from .schemas import (
     AlertOut,
+    EvalCaseCreate,
+    EvalCaseOut,
+    FailureModeOut,
     JobCreate,
     JobOut,
     JobWithLastRun,
+    LessonOut,
+    PromoteRequest,
     RunDetailOut,
     RunOut,
     RunStatPoint,
@@ -186,6 +192,83 @@ def ack_alert(alert_id: str, session: Session = Depends(db)) -> Alert:
     alert.acknowledged = True
     session.commit()
     return alert
+
+
+@app.get("/jobs/{job_id}/lessons", response_model=list[LessonOut])
+def job_lessons(job_id: str, session: Session = Depends(db)) -> list[Lesson]:
+    _get_job(session, job_id)
+    return session.scalars(
+        select(Lesson).where(Lesson.job_id == job_id).order_by(Lesson.updated_at.desc()).limit(50)
+    ).all()
+
+
+@app.get("/failure-modes", response_model=list[FailureModeOut])
+def failure_modes(job_id: str | None = None, session: Session = Depends(db)) -> list[FailureModeOut]:
+    """Failed runs clustered into recurring failure modes."""
+    return [
+        FailureModeOut(
+            signature=m.signature,
+            summary=m.summary,
+            count=m.count,
+            job_ids=sorted(m.job_ids),
+            first_seen=m.first_seen,
+            last_seen=m.last_seen,
+            sample_run_ids=m.sample_run_ids,
+            latest_run_id=m.latest_run_id,
+        )
+        for m in cluster_failures(session, job_id=job_id)
+    ]
+
+
+@app.post("/failure-modes/promote", response_model=EvalCaseOut, status_code=201)
+def promote_failure_mode(body: PromoteRequest, session: Session = Depends(db)) -> EvalCase:
+    """Turn a failure mode into a regression eval case (the flywheel step)."""
+    modes = {m.signature: m for m in cluster_failures(session, job_id=body.job_id)}
+    mode = modes.get(body.signature)
+    if mode is None:
+        raise HTTPException(404, "failure mode not found")
+
+    latest = session.get(Run, mode.latest_run_id)
+    job = latest.job
+    name = f"regression-{mode.signature}"
+    if session.scalar(select(EvalCase).where(EvalCase.name == name)):
+        raise HTTPException(409, f"eval case {name!r} already exists")
+
+    case = EvalCase(
+        name=name,
+        job_id=job.id,
+        engine=job.engine,
+        payload=job.payload or {},
+        min_score=body.min_score,
+        source_signature=mode.signature,
+    )
+    session.add(case)
+    session.commit()
+    return case
+
+
+@app.get("/eval-cases", response_model=list[EvalCaseOut])
+def list_eval_cases(session: Session = Depends(db)) -> list[EvalCase]:
+    return session.scalars(select(EvalCase).order_by(EvalCase.created_at)).all()
+
+
+@app.post("/eval-cases", response_model=EvalCaseOut, status_code=201)
+def create_eval_case(body: EvalCaseCreate, session: Session = Depends(db)) -> EvalCase:
+    if session.scalar(select(EvalCase).where(EvalCase.name == body.name)):
+        raise HTTPException(409, f"eval case named {body.name!r} already exists")
+    case = EvalCase(**body.model_dump())
+    session.add(case)
+    session.commit()
+    return case
+
+
+@app.delete("/eval-cases/{case_id}", status_code=204)
+def delete_eval_case(case_id: str, session: Session = Depends(db)) -> None:
+    case = session.get(EvalCase, case_id)
+    if case is None:
+        raise HTTPException(404, "eval case not found")
+    session.delete(case)
+    session.commit()
 
 
 @app.get("/runs/{run_id}", response_model=RunDetailOut)

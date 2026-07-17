@@ -32,13 +32,27 @@ class OfflineEngine:
         #   cost_multiplier: inflate costs to exercise the budget guard
         #   fail_at: step index that raises, to exercise retry
         #   sleep_s: per-step delay, to exercise the timeout guard
+        #   flaky_fail_at: fails at step N ONLY when the job has no lesson
+        #     about it yet — demonstrates the knowledge flywheel: first run
+        #     fails and records a lesson, the next run reads it and avoids
+        #     the trap (mirroring how Ti consults its lessons library).
         payload = ctx.payload
         steps = _WORKFLOW[: payload.get("steps", len(_WORKFLOW))]
         multiplier = payload.get("cost_multiplier", 1.0)
         fail_at = payload.get("fail_at")
         sleep_s = payload.get("sleep_s", 0)
 
+        flaky_at = payload.get("flaky_fail_at")
+        lessons_applied: list[str] = []
+        if flaky_at is not None:
+            lessons = ctx.get_lessons()
+            if any(l.title.startswith("failure:") for l in lessons):
+                lessons_applied = [l.title for l in lessons]
+                flaky_at = None  # learned from the previous failure
+
         for i, (role, name, cost, output) in enumerate(steps):
+            if flaky_at == i:
+                raise RuntimeError(f"flaky trap at step {i}: {name} (no lesson recorded yet)")
             ctx.check_cancelled()
             step = ctx.record_step(role=role, name=name, kind="phase")
             if sleep_s:
@@ -55,7 +69,7 @@ class OfflineEngine:
                 tokens_out=int(150 * multiplier),
             )
 
-        return RunResult(
-            summary="workshop completed (offline demo)",
-            data={"steps": len(steps), "cost_usd": round(ctx.cost_usd, 4)},
-        )
+        data = {"steps": len(steps), "cost_usd": round(ctx.cost_usd, 4)}
+        if lessons_applied:
+            data["lessons_applied"] = lessons_applied
+        return RunResult(summary="workshop completed (offline demo)", data=data)

@@ -208,6 +208,7 @@ async function jobDetailView(id) {
 
 async function runDetailView(id) {
   const run = await api(`/runs/${id}`);
+  const lessons = await api(`/jobs/${run.job_id}/lessons`).catch(() => []);
   const steps = run.steps.map((s) => {
     const roleClass = ["pm", "engineer", "qa", "team"].includes(s.role) ? s.role : "other";
     const io = (s.input || s.output)
@@ -240,7 +241,14 @@ async function runDetailView(id) {
         <span class="sval">${fmtScore(s.score)}</span>
         ${s.detail ? `<details><summary>detail</summary><pre>${esc(JSON.stringify(s.detail, null, 2))}</pre></details>` : ""}
       </div>`).join("")}</div>` : ""}
-    ${run.result ? `<h2>Result</h2><div class="card">${esc(run.result.summary || JSON.stringify(run.result))}</div>` : ""}
+    ${run.result ? `<h2>Result</h2><div class="card">${esc(run.result.summary || JSON.stringify(run.result))}
+      ${run.result.lessons_applied ? `<br><small style="color:var(--good-text)">✓ lessons applied: ${esc(run.result.lessons_applied.join(", "))}</small>` : ""}</div>` : ""}
+    ${lessons.length ? `<h2>Lessons this job knows</h2><div class="card">${lessons.map((l) => `
+      <div class="step">
+        <span class="role other">lesson</span>
+        <span class="name"><strong>${esc(l.title)}</strong><br><small style="color:var(--ink-2)">${esc(l.content)}</small></span>
+        <span class="meta">${relTime(l.updated_at)}</span>
+      </div>`).join("")}</div>` : ""}
     ${run.error ? `<h2>Error</h2><div class="error-box">${esc(run.error)}</div>` : ""}
     <h2>Trace</h2>
     <div class="card">${steps || '<div class="empty">no steps recorded yet</div>'}</div>`;
@@ -281,6 +289,50 @@ async function alertsView() {
     </div>`;
 }
 
+async function failuresView() {
+  const [modes, cases] = await Promise.all([api("/failure-modes"), api("/eval-cases")]);
+  const promoted = new Set(cases.map((c) => c.source_signature).filter(Boolean));
+
+  const modeRows = modes.map((m) => `
+    <tr>
+      <td><code style="font-size:12px">${esc(m.signature)}</code></td>
+      <td style="max-width:420px">${esc(m.summary)}
+        ${m.latest_run_id ? `<br><a href="#/runs/${m.latest_run_id}"><small>latest run</small></a>` : ""}</td>
+      <td class="num">${m.count}</td>
+      <td>${relTime(m.last_seen)}</td>
+      <td class="actions">${promoted.has(m.signature)
+        ? '<span style="color:var(--good-text);font-size:13px">✓ eval case</span>'
+        : `<button class="primary" data-promote="${esc(m.signature)}">Promote to eval case</button>`}</td>
+    </tr>`).join("");
+
+  const caseRows = cases.map((c) => `
+    <tr>
+      <td><strong>${esc(c.name)}</strong>${c.enabled ? "" : ' <small style="color:var(--muted)">(disabled)</small>'}</td>
+      <td>${esc(c.engine)}</td>
+      <td class="num">${fmtScore(c.min_score)}</td>
+      <td>${c.source_signature ? `<code style="font-size:12px">${esc(c.source_signature)}</code>` : '<span style="color:var(--muted)">manual</span>'}</td>
+      <td class="actions"><button data-delcase="${c.id}">Delete</button></td>
+    </tr>`).join("");
+
+  app.innerHTML = `
+    <h1>Failure modes</h1>
+    <div class="sub">failed runs clustered by error signature — promote recurring ones into regression eval cases</div>
+    <div class="card">
+      ${modes.length ? `<table>
+        <thead><tr><th>Signature</th><th>Error</th><th class="num">Count</th><th>Last seen</th><th></th></tr></thead>
+        <tbody>${modeRows}</tbody></table>`
+      : `<div class="empty">No failures recorded — nothing to cluster.</div>`}
+    </div>
+    <h2>Eval cases</h2>
+    <div class="sub">replayed by <code>python -m ticloud.eval.cli run</code> — wire into CI to block regressions</div>
+    <div class="card">
+      ${cases.length ? `<table>
+        <thead><tr><th>Name</th><th>Engine</th><th class="num">Min score</th><th>Source</th><th></th></tr></thead>
+        <tbody>${caseRows}</tbody></table>`
+      : `<div class="empty">No eval cases yet — promote a failure mode above.</div>`}
+    </div>`;
+}
+
 async function refreshAlertCount() {
   try {
     const open = await api("/alerts?acknowledged=false&limit=100");
@@ -304,6 +356,7 @@ async function render() {
   refreshAlertCount();
   try {
     if (view === "runs" && id) await runDetailView(id);
+    else if (view === "failures") { await failuresView(); schedulePoll(6000); }
     else if (view === "alerts") { await alertsView(); schedulePoll(5000); }
     else if (view === "jobs" && id) { await jobDetailView(id); schedulePoll(3000); }
     else { await jobsView(); schedulePoll(3000); }
@@ -318,6 +371,21 @@ app.addEventListener("click", (ev) => {
   if (ackBtn) {
     ev.stopPropagation();
     act("POST", `/alerts/${ackBtn.dataset.ack}/ack`, render);
+    return;
+  }
+  const promoteBtn = ev.target.closest("button[data-promote]");
+  if (promoteBtn) {
+    ev.stopPropagation();
+    api("/failure-modes/promote", {
+      method: "POST",
+      body: JSON.stringify({ signature: promoteBtn.dataset.promote }),
+    }).then(() => { toast("eval case created"); render(); }).catch((e) => toast(e.message));
+    return;
+  }
+  const delBtn = ev.target.closest("button[data-delcase]");
+  if (delBtn) {
+    ev.stopPropagation();
+    act("DELETE", `/eval-cases/${delBtn.dataset.delcase}`, render);
     return;
   }
   const btn = ev.target.closest("button[data-act]");

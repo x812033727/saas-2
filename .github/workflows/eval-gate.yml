@@ -1,0 +1,38 @@
+# Eval gate: replay the eval-set on every PR and block merges on regression.
+# This is both dogfooding for ticloud itself and the template users copy
+# into their own repos (point TICLOUD_DATABASE_URL at your eval database).
+name: eval-gate
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install platform
+        run: pip install -e "platform[dev]"
+      - name: Unit tests
+        run: cd platform && python -m pytest -q
+      - name: Run eval cases (regression gate)
+        env:
+          # Ephemeral DB seeded with the checked-in smoke case; production
+          # setups point this at the shared eval database instead.
+          TICLOUD_DATABASE_URL: sqlite:///./eval-gate.db
+        run: |
+          python - <<'PY'
+          from ticloud.db import get_session, init_db
+          from ticloud.models import EvalCase
+          init_db()
+          s = get_session()
+          if not s.query(EvalCase).count():
+              s.add(EvalCase(name="smoke-offline-workshop", engine="offline",
+                             payload={}, min_score=0.9))
+              s.commit()
+          PY
+          python -m ticloud.eval.cli run

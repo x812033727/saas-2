@@ -126,6 +126,63 @@ class RunStatPoint(BaseModel):
     scheduled_at: datetime
 
 
+class LessonOut(BaseModel):
+    id: str
+    job_id: str
+    title: str
+    content: str
+    source_run_id: str | None
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FailureModeOut(BaseModel):
+    signature: str
+    summary: str
+    count: int
+    job_ids: list[str]
+    first_seen: datetime | None
+    last_seen: datetime | None
+    sample_run_ids: list[str]
+    latest_run_id: str | None
+
+
+class PromoteRequest(BaseModel):
+    signature: str
+    job_id: str | None = None
+    min_score: float = Field(default=0.9, ge=0, le=1)
+
+
+class EvalCaseCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    engine: str = "offline"
+    payload: dict = Field(default_factory=dict)
+    min_score: float = Field(default=0.9, ge=0, le=1)
+    job_id: str | None = None
+
+    @field_validator("engine")
+    @classmethod
+    def _known_engine(cls, v: str) -> str:
+        if v not in ENGINES:
+            raise ValueError(f"unknown engine {v!r}; available: {sorted(ENGINES)}")
+        return v
+
+
+class EvalCaseOut(BaseModel):
+    id: str
+    name: str
+    job_id: str | None
+    engine: str
+    payload: dict
+    min_score: float
+    source_signature: str | None
+    enabled: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class AlertOut(BaseModel):
     id: str
     job_id: str

@@ -75,6 +75,7 @@ def execute_run(run_id: str) -> RunStatus:
 
         detail = "".join(traceback.format_exception(error)).strip()
         _finish(session, run, RunStatus.FAILED, error=detail)
+        _record_failure_lesson(ctx, run)
         if not _maybe_retry(session, run):
             # Final failure — no retry pending, so this is what a human sees.
             raise_alert(
@@ -116,6 +117,24 @@ def _maybe_retry(session, run: Run) -> bool:
     session.commit()
     log.info("scheduled retry %s (attempt %d) for run %s", retry.id, retry.attempt, run.id)
     return True
+
+
+def _record_failure_lesson(ctx: RunContext, run: Run) -> None:
+    """Every failure becomes a lesson future runs (incl. the retry) consult."""
+    from ..eval.failures import error_signature, normalize_error
+
+    try:
+        last_step = run.steps[-1].name if run.steps else "before first step"
+        ctx.record_lesson(
+            title=f"failure:{error_signature(run.error or '')}",
+            content=(
+                f"Run failed at '{last_step}' (attempt {run.attempt}): "
+                f"{normalize_error(run.error or '')}. "
+                f"Last error detail: {(run.error or '').splitlines()[-1][:500]}"
+            ),
+        )
+    except Exception:  # noqa: BLE001 - knowledge capture must not break the worker
+        log.exception("failed to record lesson for run %s", run.id)
 
 
 def _score_and_gate(session, run: Run) -> None:

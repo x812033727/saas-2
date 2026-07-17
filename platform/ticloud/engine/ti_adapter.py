@@ -14,6 +14,9 @@ Integration contract (to be wired against Ti's orchestrator in studio/):
      the live trace, cost accounting, and budget guard all apply.
   4. Honor ctx.cancelled between stages (deadline enforcement).
   5. Return a RunResult with the PR/branch URL and workshop verdict.
+  6. Bridge Ti's lessons library through ctx.get_lessons() (inject into
+     the workshop's context at kickoff) and ctx.record_lesson() (persist
+     Ti's retrospective takeaways), so knowledge accumulates per job.
 
 Requires TICLOUD_TI_PATH to point at a Ti checkout.
 """

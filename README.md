@@ -24,8 +24,18 @@ recurring agent work actually needs:
   `on_low_score: "pause"`, the schedule **auto-pauses**.
 - **Drift view** — score and cost trends per job with the gate drawn in,
   so slow degradation is visible before it becomes an incident.
-- **Knowledge flywheel** *(Phase 3)* — failures cluster into eval cases;
-  lessons persist across runs, so nightly patrols get smarter over time.
+- **Knowledge flywheel** — failures become knowledge, automatically:
+  - **Lessons**: every failure is recorded as a per-job lesson
+    (deduped by failure signature); engines read lessons before starting,
+    so a retry — and every later run — avoids the trap it already hit.
+  - **Failure modes**: failed runs cluster by normalized error signature
+    (no embedding API needed); one click promotes a recurring mode into a
+    regression **eval case**.
+  - **Eval CLI / CI gate**: `python -m ticloud.eval.cli run` replays the
+    eval-set through the real engine + scorers and exits non-zero on any
+    case below its `min_score` — wire it into CI
+    (`.github/workflows/eval-gate.yml`) and a failure mode stays red
+    until it's actually fixed.
 
 ## Quick start
 
