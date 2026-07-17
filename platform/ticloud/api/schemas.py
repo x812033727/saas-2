@@ -179,6 +179,7 @@ class RunStatPoint(BaseModel):
     cost_usd: float
     duration_s: float | None
     score: float | None
+    steps: int
     scheduled_at: datetime
 
 

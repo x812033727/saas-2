@@ -22,7 +22,7 @@ from ..db import get_session
 from ..engine import BudgetExceeded, RunContext, get_engine
 from ..eval import score_run
 from ..eval.notify import raise_alert
-from ..models import Run, RunStatus, ScoreRecord
+from ..models import Alert, Run, RunStatus, ScoreRecord
 from .queue import claim_next_run, enqueue_due_jobs
 
 log = logging.getLogger(__name__)
@@ -190,6 +190,47 @@ def _record_failure_lesson(ctx: RunContext, run: Run) -> None:
         log.exception("failed to record lesson for run %s", run.id)
 
 
+# Rolling score-regression detection (slow degradation the absolute gate misses).
+_REGRESSION_HISTORY = 10
+_REGRESSION_MIN_HISTORY = 3
+_REGRESSION_DELTA = 0.2
+
+
+def _maybe_regression_alert(session, run: Run, overall: float) -> None:
+    """Alert when this run's score falls well below the job's recent average,
+    even if it's still above the absolute threshold — catches slow drift."""
+    prior = session.scalars(
+        select(Run.score)
+        .where(Run.job_id == run.job_id, Run.id != run.id, Run.score.isnot(None))
+        .order_by(Run.scheduled_at.desc())
+        .limit(_REGRESSION_HISTORY)
+    ).all()
+    if len(prior) < _REGRESSION_MIN_HISTORY:
+        return
+    avg = sum(prior) / len(prior)
+    if overall >= avg - _REGRESSION_DELTA:
+        return
+    # One unacked regression alert per job — don't spam a declining series.
+    if session.scalar(
+        select(Alert).where(
+            Alert.job_id == run.job_id,
+            Alert.kind == "score_regression",
+            Alert.acknowledged.is_(False),
+        )
+    ):
+        return
+    raise_alert(
+        session,
+        run.job_id,
+        kind="score_regression",
+        message=(
+            f"job '{run.job.name}' score {overall:.2f} dropped from recent "
+            f"average {avg:.2f} — quality may be degrading"
+        ),
+        run_id=run.id,
+    )
+
+
 def _score_and_gate(session, run: Run) -> None:
     """Quality gate: score the finished run; alert / pause below threshold.
 
@@ -210,6 +251,8 @@ def _score_and_gate(session, run: Run) -> None:
         )
     session.commit()
     log.info("run %s scored %.3f (%s)", run.id, overall, ", ".join(f"{r.scorer}={r.score:.2f}" for r in results))
+
+    _maybe_regression_alert(session, run, overall)
 
     threshold = job.score_threshold
     if threshold is None or overall >= threshold:

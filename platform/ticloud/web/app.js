@@ -202,6 +202,10 @@ async function jobDetailView(id) {
     <div class="card">${sparkline(stats, {
       value: (p) => p.cost_usd, format: fmtMoney, label: "cost per run",
     })}</div>
+    <h2>Steps per run (last ${stats.length})</h2>
+    <div class="card">${sparkline(stats, {
+      value: (p) => p.steps, format: (v) => `${Math.round(v)}`, label: "steps per run",
+    })}</div>
     <h2>Run history</h2>
     <div class="card">
       ${runs.length ? `<table>

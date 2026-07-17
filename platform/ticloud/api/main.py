@@ -27,6 +27,7 @@ from ..models import (
     Lesson,
     Run,
     RunStatus,
+    RunStep,
     Tenant,
 )
 from ..scheduler.cron import compute_next_run
@@ -382,6 +383,15 @@ def job_stats(
         .order_by(Run.scheduled_at.desc())
         .limit(limit)
     ).all()
+    # Step counts for the whole page in one grouped query (no per-run N+1).
+    run_ids = [r.id for r in runs]
+    step_counts = dict(
+        session.execute(
+            select(RunStep.run_id, func.count(RunStep.id))
+            .where(RunStep.run_id.in_(run_ids))
+            .group_by(RunStep.run_id)
+        ).all()
+    ) if run_ids else {}
     points = [
         RunStatPoint(
             run_id=r.id,
@@ -393,6 +403,7 @@ def job_stats(
                 else None
             ),
             score=r.score,
+            steps=step_counts.get(r.id, 0),
             scheduled_at=r.scheduled_at,
         )
         for r in runs
