@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,7 +40,7 @@ class Settings(BaseSettings):
     # Multi-tenant hosted mode: "off" (default, single-tenant self-host —
     # no auth, jobs unowned) or "required" (every data route needs a tenant
     # API key and sees only that tenant's jobs/runs/alerts).
-    auth_mode: str = "off"
+    auth_mode: Literal["off", "required"] = "off"
     # Bearer token for the /admin surface (tenant + API-key management,
     # cross-tenant usage). Admin routes are disabled while unset.
     admin_token: str | None = None
