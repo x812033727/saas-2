@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
@@ -138,25 +138,29 @@ def resume_job(job_id: str, session: Session = Depends(db)) -> Job:
 
 
 @app.get("/jobs/{job_id}/runs", response_model=list[RunOut])
-def list_runs(job_id: str, limit: int = 50, session: Session = Depends(db)) -> list[Run]:
+def list_runs(
+    job_id: str, limit: int = Query(50, ge=1, le=200), session: Session = Depends(db)
+) -> list[Run]:
     _get_job(session, job_id)
     return session.scalars(
         select(Run)
         .where(Run.job_id == job_id)
         .order_by(Run.scheduled_at.desc())
-        .limit(min(limit, 200))
+        .limit(limit)
     ).all()
 
 
 @app.get("/jobs/{job_id}/stats", response_model=list[RunStatPoint])
-def job_stats(job_id: str, limit: int = 20, session: Session = Depends(db)) -> list[RunStatPoint]:
+def job_stats(
+    job_id: str, limit: int = Query(20, ge=1, le=100), session: Session = Depends(db)
+) -> list[RunStatPoint]:
     """Recent runs as trend points (oldest first, ready to plot)."""
     _get_job(session, job_id)
     runs = session.scalars(
         select(Run)
         .where(Run.job_id == job_id)
         .order_by(Run.scheduled_at.desc())
-        .limit(min(limit, 100))
+        .limit(limit)
     ).all()
     points = [
         RunStatPoint(
@@ -177,8 +181,12 @@ def job_stats(job_id: str, limit: int = 20, session: Session = Depends(db)) -> l
 
 
 @app.get("/alerts", response_model=list[AlertOut])
-def list_alerts(acknowledged: bool | None = None, limit: int = 100, session: Session = Depends(db)) -> list[Alert]:
-    stmt = select(Alert).order_by(Alert.created_at.desc()).limit(min(limit, 500))
+def list_alerts(
+    acknowledged: bool | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    session: Session = Depends(db),
+) -> list[Alert]:
+    stmt = select(Alert).order_by(Alert.created_at.desc()).limit(limit)
     if acknowledged is not None:
         stmt = stmt.where(Alert.acknowledged.is_(acknowledged))
     return session.scalars(stmt).all()
