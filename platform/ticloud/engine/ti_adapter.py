@@ -149,7 +149,14 @@ class TiEngine:
                         name=line.get("name") or "step",
                         kind=line.get("kind") or "phase",
                     )
-                    ctx.finish_step(step, output=line.get("output"))
+                    output = line.get("output")
+                    ctx.finish_step(step, output=output)
+                    # Record a published PR the moment it lands, so a workshop
+                    # that opens a PR and then blows its budget/deadline still
+                    # surfaces it — the budget/timeout paths never emit a
+                    # RunResult, and add_cost below may raise on this very step.
+                    if line.get("kind") == "publish" and output and output.get("pr_url"):
+                        ctx.note_result(pr_url=output.get("pr_url"), branch=output.get("branch"))
                 elif kind == "cost":
                     ctx.add_cost(
                         float(line.get("cost_usd") or 0.0),

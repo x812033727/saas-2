@@ -161,6 +161,25 @@ time.sleep(60)
     _assert_process_gone(int(pid_file.read_text()))
 
 
+def test_ti_published_pr_survives_budget_exceeded(session, fake_runner):
+    """A PR opened mid-run must be recorded even when the run then blows
+    its budget — the workshop did real work before winding down."""
+    fake_runner(
+        """
+emit({"t": "step", "role": "team", "kind": "publish", "name": "publish results",
+      "output": {"ok": True, "pr_url": "https://github.com/acme/widgets/pull/9",
+                 "branch": "ti-studio/x"}})
+emit({"t": "cost", "cost_usd": 999.0, "tokens_in": 1, "tokens_out": 1})
+time.sleep(60)
+"""
+    )
+    run = run_job_once(session, engine="ti", payload=TI_PAYLOAD, budget_usd=1.0)
+
+    assert run.status == RunStatus.BUDGET_EXCEEDED
+    assert run.result and run.result["pr_url"] == "https://github.com/acme/widgets/pull/9"
+    assert run.result["branch"] == "ti-studio/x"
+
+
 def test_ti_timeout_cancels_runner(session, fake_runner, tmp_path, monkeypatch):
     pid_file = tmp_path / "runner.pid"
     monkeypatch.setenv("TICLOUD_TEST_DUMP", str(pid_file))

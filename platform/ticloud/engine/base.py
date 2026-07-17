@@ -61,6 +61,20 @@ class RunContext:
         so engines can carry failure context into the next attempt."""
         return (self._run.result or {}).get("previous_error")
 
+    def note_result(self, **data) -> None:
+        """Persist partial result data mid-run, so an outcome an engine
+        produces before it later fails/times-out/blows budget isn't lost.
+
+        The worker overwrites run.result with the RunResult on success, so
+        this only shows through on the non-success terminal paths (which
+        never touch run.result). None values are ignored so a later, richer
+        note never clobbers an earlier field with a blank.
+        """
+        merged = dict(self._run.result or {})
+        merged.update({k: v for k, v in data.items() if v is not None})
+        self._run.result = merged
+        self._session.commit()
+
     def record_step(
         self,
         role: str,
