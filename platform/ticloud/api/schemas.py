@@ -18,6 +18,7 @@ class JobCreate(BaseModel):
     max_retries: int = Field(default_factory=lambda: settings.default_max_retries, ge=0)
     retry_backoff_s: int = Field(default=0, ge=0)
     approval_required: bool = False
+    webhook_url: str | None = Field(default=None, max_length=500)
     score_threshold: float | None = Field(default=None, ge=0, le=1)
     on_low_score: str = "alert"
     scorers: dict = Field(default_factory=dict)
@@ -57,6 +58,7 @@ class JobUpdate(BaseModel):
     max_retries: int | None = Field(default=None, ge=0)
     retry_backoff_s: int | None = Field(default=None, ge=0)
     approval_required: bool | None = None
+    webhook_url: str | None = Field(default=None, max_length=500)
     score_threshold: float | None = Field(default=None, ge=0, le=1)
     on_low_score: str | None = None
     scorers: dict | None = None
@@ -107,6 +109,7 @@ class JobOut(BaseModel):
     max_retries: int
     retry_backoff_s: int
     approval_required: bool
+    webhook_url: str | None
     score_threshold: float | None
     on_low_score: str
     scorers: dict
@@ -258,9 +261,18 @@ class TenantOut(BaseModel):
     monthly_budget_usd: float | None
     plan: str
     subscription_status: str
+    webhook_url: str | None
+    max_concurrent_runs: int | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TenantUpdate(BaseModel):
+    """Partial update of a tenant's operational settings."""
+
+    webhook_url: str | None = Field(default=None, max_length=500)
+    max_concurrent_runs: int | None = Field(default=None, ge=1)
 
 
 class TenantBudget(BaseModel):

@@ -34,6 +34,7 @@ def _ensure_new_columns() -> None:
             ("tenant_id", "VARCHAR(32)"),
             ("retry_backoff_s", "INTEGER DEFAULT 0"),
             ("approval_required", "BOOLEAN DEFAULT 0"),
+            ("webhook_url", "VARCHAR(500)"),
         ],
         "runs": [
             ("cancel_requested", "BOOLEAN DEFAULT 0"),
@@ -44,6 +45,8 @@ def _ensure_new_columns() -> None:
             ("plan", "VARCHAR(50) DEFAULT 'free'"),
             ("subscription_status", "VARCHAR(30) DEFAULT 'none'"),
             ("stripe_customer_id", "VARCHAR(64)"),
+            ("webhook_url", "VARCHAR(500)"),
+            ("max_concurrent_runs", "INTEGER"),
         ],
     }
     # (index name, table, column list) — names match what create_all emits on

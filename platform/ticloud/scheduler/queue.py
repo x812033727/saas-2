@@ -8,14 +8,27 @@ transactional claim, which is safe for a single worker process.
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..billing import tenant_over_budget
+from ..config import settings
 from ..models import Alert, Job, Run, RunStatus
 from .cron import compute_next_run
 
 log = logging.getLogger(__name__)
+
+# How many oldest-queued runs to consider when the head-of-line run's tenant
+# is at its concurrency cap (so one busy tenant can't block the whole queue).
+_CLAIM_CANDIDATES = 25
+
+
+def running_count(session: Session, tenant_id: str | None = None) -> int:
+    """Count RUNNING runs, optionally scoped to one tenant's jobs."""
+    stmt = select(func.count(Run.id)).where(Run.status == RunStatus.RUNNING)
+    if tenant_id is not None:
+        stmt = stmt.where(Run.job_id.in_(select(Job.id).where(Job.tenant_id == tenant_id)))
+    return session.scalar(stmt) or 0
 
 
 def _quota_blocked(session: Session, job: Job, now: datetime) -> bool:
@@ -87,22 +100,34 @@ def enqueue_manual(session: Session, job: Job) -> Run:
 
 
 def claim_next_run(session: Session, now: datetime | None = None) -> Run | None:
-    """Atomically claim one queued run whose scheduled_at has arrived, and
-    mark it RUNNING. The scheduled_at gate lets a retry's backoff delay it."""
+    """Atomically claim one due queued run and mark it RUNNING.
+
+    Respects the global concurrency cap and per-tenant caps: if the oldest
+    due run's tenant is at capacity it's skipped and the next eligible run is
+    tried, so a burst from one tenant can't monopolise workers or overspend."""
     now = now or datetime.now(timezone.utc)
+    if settings.max_concurrent_runs and running_count(session) >= settings.max_concurrent_runs:
+        return None
+
     stmt = (
         select(Run)
         .where(Run.status == RunStatus.QUEUED, Run.scheduled_at <= now)
         .order_by(Run.scheduled_at)
-        .limit(1)
+        .limit(_CLAIM_CANDIDATES)
     )
     if session.get_bind().dialect.name == "postgresql":
         stmt = stmt.with_for_update(skip_locked=True)
 
-    run = session.scalars(stmt).first()
-    if run is None:
-        return None
-    run.status = RunStatus.RUNNING
-    run.started_at = datetime.now(timezone.utc)
-    session.commit()
-    return run
+    for run in session.scalars(stmt):
+        tenant = run.job.tenant
+        if (
+            tenant is not None
+            and tenant.max_concurrent_runs is not None
+            and running_count(session, tenant.id) >= tenant.max_concurrent_runs
+        ):
+            continue  # this tenant is at capacity — try the next queued run
+        run.status = RunStatus.RUNNING
+        run.started_at = datetime.now(timezone.utc)
+        session.commit()
+        return run
+    return None
