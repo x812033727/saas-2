@@ -167,6 +167,15 @@ monthly run/cost/token totals and `GET /admin/usage` is the cross-tenant
 billing export. Keys are stored hashed and revocable
 (`POST /admin/keys/{id}/revoke`).
 
+Give a tenant a monthly spend cap with
+`PUT /admin/tenants/{id}/budget` (`{"monthly_budget_usd": 25}`; `null`
+clears it). Once this month's spend across the tenant's jobs reaches the
+cap, a manual trigger returns `402` and scheduled runs are skipped (the
+schedule keeps advancing, so it resumes automatically next month) with a
+one-time `quota_exceeded` alert. Per-run `budget_usd` still guards each
+individual run; the account cap is the monthly ceiling on top. `GET /usage`
+reports the cap, month-to-date spend, and an `over_budget` flag.
+
 ## Layout
 
 ```
