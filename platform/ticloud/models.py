@@ -82,7 +82,13 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(String(200), unique=True)
     # Calendar-month spend cap (USD) across the tenant's jobs; None = unlimited.
     # At/over the cap, new runs are refused (manual) or skipped (scheduled).
+    # Usually set from the subscription plan, but can be overridden per tenant.
     monthly_budget_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Billing: the plan drives the default budget; Stripe webhooks keep these
+    # in sync. Self-managed comp accounts can also be set directly by admin.
+    plan: Mapped[str] = mapped_column(String(50), default="free")
+    subscription_status: Mapped[str] = mapped_column(String(30), default="none")
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(

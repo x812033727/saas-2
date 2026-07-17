@@ -32,9 +32,16 @@ def _ensure_new_columns() -> None:
                 conn.execute(text("ALTER TABLE jobs ADD COLUMN tenant_id VARCHAR(32)"))
     if "tenants" in tables:
         columns = {c["name"] for c in inspector.get_columns("tenants")}
-        if "monthly_budget_usd" not in columns:
-            with engine.begin() as conn:
-                conn.execute(text("ALTER TABLE tenants ADD COLUMN monthly_budget_usd FLOAT"))
+        added = [
+            ("monthly_budget_usd", "FLOAT"),
+            ("plan", "VARCHAR(50) DEFAULT 'free'"),
+            ("subscription_status", "VARCHAR(30) DEFAULT 'none'"),
+            ("stripe_customer_id", "VARCHAR(64)"),
+        ]
+        with engine.begin() as conn:
+            for name, coltype in added:
+                if name not in columns:
+                    conn.execute(text(f"ALTER TABLE tenants ADD COLUMN {name} {coltype}"))
 
 
 def get_session() -> Session:

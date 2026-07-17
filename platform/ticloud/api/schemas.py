@@ -203,6 +203,8 @@ class TenantOut(BaseModel):
     id: str
     name: str
     monthly_budget_usd: float | None
+    plan: str
+    subscription_status: str
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -211,6 +213,10 @@ class TenantOut(BaseModel):
 class TenantBudget(BaseModel):
     # None clears the cap (unlimited).
     monthly_budget_usd: float | None = Field(default=None, ge=0)
+
+
+class TenantPlan(BaseModel):
+    plan: str = Field(min_length=1, max_length=50)
 
 
 class ApiKeyCreate(BaseModel):

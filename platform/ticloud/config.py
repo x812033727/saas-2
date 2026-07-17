@@ -35,5 +35,12 @@ class Settings(BaseSettings):
     # cross-tenant usage). Admin routes are disabled while unset.
     admin_token: str | None = None
 
+    # Stripe billing (optional). Without the webhook secret the webhook
+    # endpoint parses events unverified (local/dev only); production must set
+    # it so signatures are checked. The secret key is used by the app to
+    # create Checkout sessions (not needed to receive webhooks).
+    stripe_secret_key: str | None = None
+    stripe_webhook_secret: str | None = None
+
 
 settings = Settings()

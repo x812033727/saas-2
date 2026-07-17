@@ -35,6 +35,9 @@ postgres = [
 judge = [
     "anthropic>=0.40",
 ]
+billing = [
+    "stripe>=7.0",
+]
 
 [project.urls]
 Repository = "https://github.com/x812033727/saas-2"
