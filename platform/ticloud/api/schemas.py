@@ -16,6 +16,7 @@ class JobCreate(BaseModel):
     timeout_s: int = Field(default_factory=lambda: settings.default_timeout_s, ge=1)
     budget_usd: float = Field(default_factory=lambda: settings.default_budget_usd, gt=0)
     max_retries: int = Field(default_factory=lambda: settings.default_max_retries, ge=0)
+    retry_backoff_s: int = Field(default=0, ge=0)
     score_threshold: float | None = Field(default=None, ge=0, le=1)
     on_low_score: str = "alert"
     scorers: dict = Field(default_factory=dict)
@@ -42,6 +43,37 @@ class JobCreate(BaseModel):
         return v
 
 
+class JobUpdate(BaseModel):
+    """Partial update — only provided fields change (use model_fields_set).
+    Reuses JobCreate's validators; schedule fields re-anchor next_run_at."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    payload: dict | None = None
+    cron: str | None = None
+    interval_seconds: int | None = Field(default=None, ge=10)
+    timeout_s: int | None = Field(default=None, ge=1)
+    budget_usd: float | None = Field(default=None, gt=0)
+    max_retries: int | None = Field(default=None, ge=0)
+    retry_backoff_s: int | None = Field(default=None, ge=0)
+    score_threshold: float | None = Field(default=None, ge=0, le=1)
+    on_low_score: str | None = None
+    scorers: dict | None = None
+
+    @field_validator("on_low_score")
+    @classmethod
+    def _valid_action(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("alert", "pause"):
+            raise ValueError("on_low_score must be 'alert' or 'pause'")
+        return v
+
+    @field_validator("cron")
+    @classmethod
+    def _valid_cron(cls, v: str | None) -> str | None:
+        if v is not None and not validate_cron(v):
+            raise ValueError(f"invalid cron expression: {v!r}")
+        return v
+
+
 class JobOut(BaseModel):
     id: str
     name: str
@@ -54,6 +86,7 @@ class JobOut(BaseModel):
     timeout_s: int
     budget_usd: float
     max_retries: int
+    retry_backoff_s: int
     score_threshold: float | None
     on_low_score: str
     scorers: dict
