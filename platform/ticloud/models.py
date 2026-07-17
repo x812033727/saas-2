@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     TypeDecorator,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -109,9 +110,13 @@ class Job(Base):
     """A scheduled agent job: what to run, when, and under what guards."""
 
     __tablename__ = "jobs"
+    # Names are unique per tenant, not globally — two tenants may both own a
+    # "daily-sync". NULL tenant (self-host mode) uniqueness is enforced at the
+    # API layer, since SQL treats NULLs as distinct in unique constraints.
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_jobs_tenant_name"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
+    name: Mapped[str] = mapped_column(String(200))
     # Owning tenant in hosted mode; NULL in single-tenant self-host mode.
     tenant_id: Mapped[str | None] = mapped_column(
         ForeignKey("tenants.id"), nullable=True, index=True

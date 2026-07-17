@@ -112,7 +112,10 @@ def create_job(
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> Job:
-    if session.scalar(select(Job).where(Job.name == body.name)):
+    # Uniqueness is per tenant (NULL tenant = the single self-host namespace),
+    # so one tenant's job names neither block nor leak to another's.
+    tenant_id = tenant.id if tenant is not None else None
+    if session.scalar(select(Job).where(Job.name == body.name, Job.tenant_id == tenant_id)):
         raise HTTPException(409, f"job named {body.name!r} already exists")
     job = Job(**body.model_dump())
     if tenant is not None:
@@ -326,7 +329,9 @@ def promote_failure_mode(
 
     latest = session.get(Run, mode.latest_run_id)
     job = latest.job
-    name = f"regression-{mode.signature}"
+    # Namespace by job so the same normalized signature (timeouts, connection
+    # errors, ...) hit by different jobs/tenants never collides on name.
+    name = f"regression-{job.id[:8]}-{mode.signature}"
     if session.scalar(select(EvalCase).where(EvalCase.name == name)):
         raise HTTPException(409, f"eval case {name!r} already exists")
 

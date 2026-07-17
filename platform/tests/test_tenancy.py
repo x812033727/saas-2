@@ -148,6 +148,35 @@ def test_hosted_job_ownership_and_failure_scoping(client, hosted, session):
     assert client.delete(f"/eval-cases/{case['id']}", headers=auth_b).status_code == 404
 
 
+def test_tenants_have_independent_name_namespaces(client, hosted, session):
+    """Same job name across tenants; same failure signature promotes for both."""
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+
+    spec = {"name": "daily-sync", "payload": {"fail_at": 1}, "max_retries": 0}
+    job_a = client.post("/jobs", json=spec, headers=auth_a)
+    job_b = client.post("/jobs", json=spec, headers=auth_b)
+    assert (job_a.status_code, job_b.status_code) == (201, 201)
+    # ...but still unique within one tenant.
+    assert client.post("/jobs", json=spec, headers=auth_a).status_code == 409
+
+    from ticloud.scheduler.queue import claim_next_run
+    from ticloud.scheduler.worker import execute_run
+
+    for auth, job in ((auth_a, job_a.json()), (auth_b, job_b.json())):
+        client.post(f"/jobs/{job['id']}/trigger", headers=auth)
+        execute_run(claim_next_run(session).id)
+
+    # Identical normalized signature on both sides — each tenant can promote.
+    sig_a = client.get("/failure-modes", headers=auth_a).json()[0]["signature"]
+    sig_b = client.get("/failure-modes", headers=auth_b).json()[0]["signature"]
+    assert sig_a == sig_b
+    ok_a = client.post("/failure-modes/promote", json={"signature": sig_a}, headers=auth_a)
+    ok_b = client.post("/failure-modes/promote", json={"signature": sig_b}, headers=auth_b)
+    assert (ok_a.status_code, ok_b.status_code) == (201, 201)
+    assert ok_a.json()["name"] != ok_b.json()["name"]
+
+
 def test_hosted_eval_case_requires_owned_job(client, hosted):
     _, _, auth_a = _mint_tenant(client, "team-a")
     r = client.post("/eval-cases", json={"name": "global-case"}, headers=auth_a)
