@@ -77,7 +77,7 @@ docker compose -f deploy/docker-compose.yml up
 
 # Or local dev (SQLite, zero config):
 pip install -e "platform[dev]"
-uvicorn ticloud.api.main:app --reload &        # API + dashboard on :8000
+uvicorn ticloud.api.main:app --reload &        # API + dashboard on :8000/ui/
 python -m ticloud.scheduler.worker &           # scheduler + executor
 python -m ticloud.demo                         # seed the showcase jobs
 ```
