@@ -127,6 +127,15 @@ Flagship templates: `nightly-repo-patrol`, `dependency-upgrade`,
 `ci-babysitter` (all Ti-engine, open PRs against your repo), plus
 `demo-workshop` (offline, zero setup).
 
+## Human-approval gate
+
+Set `approval_required: true` on a job and **no run executes until a human
+approves it** — the trust gate for unattended agents. Each triggered/
+scheduled run parks in `awaiting_approval` and raises an
+`approval_required` alert; `GET /approvals` is the queue.
+`POST /runs/{id}/approve` re-queues it to run; `POST /runs/{id}/reject`
+terminates it without ever running the engine.
+
 ## Running the flagship Ti engine
 
 The Ti adapter drives a real [Ti](https://github.com/x812033727/Ti)

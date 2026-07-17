@@ -583,6 +583,52 @@ def cancel_run(
     return run
 
 
+@app.get("/approvals", response_model=list[RunOut])
+def list_approvals(
+    session: Session = Depends(db), tenant: Tenant | None = Depends(current_tenant)
+) -> list[Run]:
+    """Runs held for human approval (the approvals queue)."""
+    stmt = select(Run).where(Run.status == RunStatus.AWAITING_APPROVAL)
+    if tenant is not None:
+        stmt = stmt.where(Run.job_id.in_(_tenant_job_ids(session, tenant)))
+    return session.scalars(stmt.order_by(Run.scheduled_at.desc())).all()
+
+
+@app.post("/runs/{run_id}/approve", response_model=RunOut)
+def approve_run(
+    run_id: str,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> Run:
+    """Approve a held run: it re-enters the queue and executes."""
+    run = _get_run(session, run_id, tenant)
+    if run.status != RunStatus.AWAITING_APPROVAL:
+        raise HTTPException(409, "run is not awaiting approval")
+    run.approval_state = "approved"
+    run.status = RunStatus.QUEUED
+    run.scheduled_at = datetime.now(timezone.utc)  # claimable immediately
+    session.commit()
+    return run
+
+
+@app.post("/runs/{run_id}/reject", response_model=RunOut)
+def reject_run(
+    run_id: str,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> Run:
+    """Reject a held run: it terminates without ever executing."""
+    run = _get_run(session, run_id, tenant)
+    if run.status != RunStatus.AWAITING_APPROVAL:
+        raise HTTPException(409, "run is not awaiting approval")
+    run.approval_state = "rejected"
+    run.status = RunStatus.CANCELLED
+    run.error = "rejected by reviewer"
+    run.finished_at = datetime.now(timezone.utc)
+    session.commit()
+    return run
+
+
 # --- usage metering ---------------------------------------------------------
 
 

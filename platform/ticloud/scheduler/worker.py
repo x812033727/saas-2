@@ -49,6 +49,23 @@ def execute_run(run_id: str) -> RunStatus:
     try:
         run = session.get(Run, run_id)
         job = run.job
+        # Pre-execution approval gate: never run the engine on an
+        # approval-required job until a human has approved this run. Hold it
+        # in AWAITING_APPROVAL and stop — approve requeues it (approved), so
+        # it won't re-gate; reject terminates it.
+        if job.approval_required and run.approval_state != "approved":
+            run.status = RunStatus.AWAITING_APPROVAL
+            run.approval_state = "pending"
+            session.commit()
+            raise_alert(
+                session,
+                job.id,
+                kind="approval_required",
+                message=f"job '{job.name}' run is awaiting approval before it runs",
+                run_id=run.id,
+            )
+            log.info("run %s awaiting approval", run.id)
+            return RunStatus.AWAITING_APPROVAL
         if run.status != RunStatus.RUNNING:  # direct execution without a claim
             run.status = RunStatus.RUNNING
             run.started_at = datetime.now(timezone.utc)

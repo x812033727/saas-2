@@ -55,6 +55,8 @@ class Base(DeclarativeBase):
 
 class RunStatus(str, enum.Enum):
     QUEUED = "queued"
+    # Held before execution for a human to approve (approval_required jobs).
+    AWAITING_APPROVAL = "awaiting_approval"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
@@ -152,6 +154,9 @@ class Job(Base):
     # immediately (previous behaviour). Guards against hammering a flaky
     # external dep (e.g. a rate-limited API) with instant re-attempts.
     retry_backoff_s: Mapped[int] = mapped_column(Integer, default=0)
+    # When set, every run waits for a human to approve it before the engine
+    # executes ("never runs unreviewed").
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Quality gate: every finished run is scored 0..1; scoring below the
     # threshold raises an alert, and on_low_score="pause" also pauses the
@@ -186,6 +191,8 @@ class Run(Base):
     # Set by POST /runs/{id}/cancel; the worker polls this mid-run (across
     # processes) and cooperatively cancels an in-flight run.
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    # None = no approval gate; "pending"/"approved"/"rejected" while gated.
+    approval_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     scheduled_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)

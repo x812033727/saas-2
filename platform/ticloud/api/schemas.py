@@ -17,6 +17,7 @@ class JobCreate(BaseModel):
     budget_usd: float = Field(default_factory=lambda: settings.default_budget_usd, gt=0)
     max_retries: int = Field(default_factory=lambda: settings.default_max_retries, ge=0)
     retry_backoff_s: int = Field(default=0, ge=0)
+    approval_required: bool = False
     score_threshold: float | None = Field(default=None, ge=0, le=1)
     on_low_score: str = "alert"
     scorers: dict = Field(default_factory=dict)
@@ -55,6 +56,7 @@ class JobUpdate(BaseModel):
     budget_usd: float | None = Field(default=None, gt=0)
     max_retries: int | None = Field(default=None, ge=0)
     retry_backoff_s: int | None = Field(default=None, ge=0)
+    approval_required: bool | None = None
     score_threshold: float | None = Field(default=None, ge=0, le=1)
     on_low_score: str | None = None
     scorers: dict | None = None
@@ -104,6 +106,7 @@ class JobOut(BaseModel):
     budget_usd: float
     max_retries: int
     retry_backoff_s: int
+    approval_required: bool
     score_threshold: float | None
     on_low_score: str
     scorers: dict

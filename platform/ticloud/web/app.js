@@ -54,6 +54,7 @@ const STATUS_LABEL = {
   succeeded: "✓ succeeded", failed: "✕ failed", running: "● running",
   queued: "◌ queued", timed_out: "⏱ timed out",
   budget_exceeded: "$ over budget", cancelled: "− cancelled",
+  awaiting_approval: "⏸ awaiting approval",
 };
 const badge = (status) =>
   `<span class="badge ${esc(status)}"><span class="dot"></span>${esc(STATUS_LABEL[status] || status)}</span>`;

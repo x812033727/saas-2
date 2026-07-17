@@ -33,8 +33,12 @@ def _ensure_new_columns() -> None:
         "jobs": [
             ("tenant_id", "VARCHAR(32)"),
             ("retry_backoff_s", "INTEGER DEFAULT 0"),
+            ("approval_required", "BOOLEAN DEFAULT 0"),
         ],
-        "runs": [("cancel_requested", "BOOLEAN DEFAULT 0")],
+        "runs": [
+            ("cancel_requested", "BOOLEAN DEFAULT 0"),
+            ("approval_state", "VARCHAR(20)"),
+        ],
         "tenants": [
             ("monthly_budget_usd", "FLOAT"),
             ("plan", "VARCHAR(50) DEFAULT 'free'"),
