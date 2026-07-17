@@ -62,6 +62,28 @@ def test_trigger_execute_and_inspect_trace(client):
     assert len(runs) == 1 and runs[0]["id"] == run["id"]
 
 
+def test_limit_validation_for_runs_stats_and_alerts(client):
+    job = create_job(client)
+    cases = [
+        (f"/jobs/{job['id']}/runs", -1, 422),
+        (f"/jobs/{job['id']}/runs", 0, 422),
+        (f"/jobs/{job['id']}/runs", 201, 422),
+        (f"/jobs/{job['id']}/runs", 1, 200),
+        (f"/jobs/{job['id']}/stats", -1, 422),
+        (f"/jobs/{job['id']}/stats", 0, 422),
+        (f"/jobs/{job['id']}/stats", 101, 422),
+        (f"/jobs/{job['id']}/stats", 1, 200),
+        ("/alerts", -1, 422),
+        ("/alerts", 0, 422),
+        ("/alerts", 501, 422),
+        ("/alerts", 1, 200),
+    ]
+
+    for path, limit, expected_status in cases:
+        resp = client.get(path, params={"limit": limit})
+        assert resp.status_code == expected_status, (path, limit, resp.text)
+
+
 def test_missing_resources_404(client):
     assert client.get("/jobs/nope").status_code == 404
     assert client.get("/runs/nope").status_code == 404
