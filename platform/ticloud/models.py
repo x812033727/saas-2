@@ -148,6 +148,10 @@ class Job(Base):
     timeout_s: Mapped[int] = mapped_column(Integer, default=1800)
     budget_usd: Mapped[float] = mapped_column(Float, default=5.0)
     max_retries: Mapped[int] = mapped_column(Integer, default=2)
+    # Delay before a retry (seconds); doubles each attempt. 0 = retry
+    # immediately (previous behaviour). Guards against hammering a flaky
+    # external dep (e.g. a rate-limited API) with instant re-attempts.
+    retry_backoff_s: Mapped[int] = mapped_column(Integer, default=0)
 
     # Quality gate: every finished run is scored 0..1; scoring below the
     # threshold raises an alert, and on_low_score="pause" also pauses the
@@ -179,6 +183,9 @@ class Run(Base):
         index=True,
     )
     attempt: Mapped[int] = mapped_column(Integer, default=1)
+    # Set by POST /runs/{id}/cancel; the worker polls this mid-run (across
+    # processes) and cooperatively cancels an in-flight run.
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
 
     scheduled_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), nullable=True)

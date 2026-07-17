@@ -13,7 +13,9 @@ import logging
 import threading
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select
 
 from ..config import settings
 from ..db import get_session
@@ -27,6 +29,18 @@ log = logging.getLogger(__name__)
 
 # How long after the deadline a cooperative engine gets to exit cleanly.
 GRACE_PERIOD_S = 5.0
+# How often a running engine is checked for a cross-process cancel request.
+CANCEL_POLL_S = 2.0
+
+
+def _cancel_requested(run_id: str) -> bool:
+    """Read Run.cancel_requested on a fresh session so the worker sees the
+    API's commit from another connection (avoids a stale read snapshot)."""
+    s = get_session()
+    try:
+        return bool(s.scalar(select(Run.cancel_requested).where(Run.id == run_id)))
+    finally:
+        s.close()
 
 
 def execute_run(run_id: str) -> RunStatus:
@@ -52,13 +66,27 @@ def execute_run(run_id: str) -> RunStatus:
 
         thread = threading.Thread(target=_target, daemon=True)
         thread.start()
-        thread.join(timeout=job.timeout_s)
-        if thread.is_alive():
-            ctx.cancelled.set()
-            thread.join(timeout=GRACE_PERIOD_S)
-            _finish(session, run, RunStatus.TIMED_OUT, error=f"exceeded timeout of {job.timeout_s}s")
-            _score_and_gate(session, run)
-            return RunStatus.TIMED_OUT
+        # Poll so the deadline AND a cross-process cancel request are both
+        # observed (the API sets Run.cancel_requested from another process).
+        deadline = time.monotonic() + job.timeout_s
+        while thread.is_alive():
+            thread.join(timeout=min(CANCEL_POLL_S, max(0.0, deadline - time.monotonic())))
+            if not thread.is_alive():
+                break
+            if time.monotonic() >= deadline:
+                ctx.cancelled.set()
+                thread.join(timeout=GRACE_PERIOD_S)
+                _finish(
+                    session, run, RunStatus.TIMED_OUT, error=f"exceeded timeout of {job.timeout_s}s"
+                )
+                _score_and_gate(session, run)
+                return RunStatus.TIMED_OUT
+            if _cancel_requested(run_id):
+                ctx.cancelled.set()
+                thread.join(timeout=GRACE_PERIOD_S)
+                # A user cancel is not a quality signal: don't score, alert, or retry.
+                _finish(session, run, RunStatus.CANCELLED, error="cancelled by user")
+                return RunStatus.CANCELLED
 
         error = outcome.get("error")
         if error is None:
@@ -106,16 +134,24 @@ def _maybe_retry(session, run: Run) -> bool:
     if run.attempt > job.max_retries:
         log.warning("run %s exhausted retries (%d)", run.id, job.max_retries)
         return False
+    # Exponential backoff: attempt N (1-based) waits backoff * 2^(N-1). The
+    # claim query only picks runs whose scheduled_at has arrived, so a future
+    # scheduled_at genuinely delays the retry.
+    delay = job.retry_backoff_s * (2 ** (run.attempt - 1)) if job.retry_backoff_s else 0
     retry = Run(
         job_id=job.id,
         status=RunStatus.QUEUED,
         attempt=run.attempt + 1,
+        scheduled_at=datetime.now(timezone.utc) + timedelta(seconds=delay),
         # Engines can read this to avoid repeating the same mistake.
         result={"retry_of": run.id, "previous_error": (run.error or "")[:2000]},
     )
     session.add(retry)
     session.commit()
-    log.info("scheduled retry %s (attempt %d) for run %s", retry.id, retry.attempt, run.id)
+    log.info(
+        "scheduled retry %s (attempt %d, +%ds) for run %s",
+        retry.id, retry.attempt, delay, run.id,
+    )
     return True
 
 

@@ -86,11 +86,13 @@ def enqueue_manual(session: Session, job: Job) -> Run:
     return run
 
 
-def claim_next_run(session: Session) -> Run | None:
-    """Atomically claim one queued run and mark it RUNNING."""
+def claim_next_run(session: Session, now: datetime | None = None) -> Run | None:
+    """Atomically claim one queued run whose scheduled_at has arrived, and
+    mark it RUNNING. The scheduled_at gate lets a retry's backoff delay it."""
+    now = now or datetime.now(timezone.utc)
     stmt = (
         select(Run)
-        .where(Run.status == RunStatus.QUEUED)
+        .where(Run.status == RunStatus.QUEUED, Run.scheduled_at <= now)
         .order_by(Run.scheduled_at)
         .limit(1)
     )

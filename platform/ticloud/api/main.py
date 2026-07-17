@@ -15,7 +15,17 @@ from .. import __version__
 from ..billing import month_to_date_cost, runs_since_filter, tenant_over_budget
 from ..db import SessionLocal, init_db
 from ..eval.failures import cluster_failures
-from ..models import Alert, ApiKey, EvalCase, Job, Lesson, Run, RunStatus, Tenant
+from ..models import (
+    TERMINAL_STATUSES,
+    Alert,
+    ApiKey,
+    EvalCase,
+    Job,
+    Lesson,
+    Run,
+    RunStatus,
+    Tenant,
+)
 from ..scheduler.cron import compute_next_run
 from ..scheduler.queue import enqueue_manual
 from .auth import generate_key, hash_key, make_current_tenant, require_admin
@@ -29,6 +39,7 @@ from .schemas import (
     FailureModeOut,
     JobCreate,
     JobOut,
+    JobUpdate,
     JobWithLastRun,
     LessonOut,
     PromoteRequest,
@@ -189,6 +200,37 @@ def get_job(
     return _get_job(session, job_id, tenant)
 
 
+_SCHEDULE_FIELDS = {"cron", "interval_seconds"}
+
+
+@app.patch("/jobs/{job_id}", response_model=JobOut)
+def update_job(
+    job_id: str,
+    body: JobUpdate,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> Job:
+    """Partial update — change schedule/guards/payload without losing the
+    job's run history, lessons, and failure clusters (delete+recreate did)."""
+    job = _get_job(session, job_id, tenant)
+    changes = body.model_dump(exclude_unset=True)
+    if "name" in changes and changes["name"] != job.name:
+        tenant_id = tenant.id if tenant is not None else None
+        clash = session.scalar(
+            select(Job).where(
+                Job.name == changes["name"], Job.tenant_id == tenant_id, Job.id != job.id
+            )
+        )
+        if clash is not None:
+            raise HTTPException(409, f"job named {changes['name']!r} already exists")
+    for field, value in changes.items():
+        setattr(job, field, value)
+    if _SCHEDULE_FIELDS & changes.keys():
+        job.next_run_at = compute_next_run(job)
+    session.commit()
+    return job
+
+
 @app.delete("/jobs/{job_id}", status_code=204)
 def delete_job(
     job_id: str,
@@ -240,19 +282,38 @@ def resume_job(
     return job
 
 
+def _keyset_before(ts_col, id_col, cursor: str | None):
+    """Keyset filter for descending (ts, id) pages. `cursor` is the last seen
+    item's "<ts_iso>|<id>"; returns rows strictly older. Bad cursor → 422."""
+    if not cursor:
+        return None
+    try:
+        ts_str, _, cid = cursor.rpartition("|")
+        ts = datetime.fromisoformat(ts_str)
+    except ValueError:
+        raise HTTPException(422, "invalid cursor")
+    from sqlalchemy import and_, or_
+
+    return or_(ts_col < ts, and_(ts_col == ts, id_col < cid))
+
+
 @app.get("/jobs/{job_id}/runs", response_model=list[RunOut])
 def list_runs(
     job_id: str,
     limit: int = Query(50, ge=1, le=200),
+    cursor: str | None = None,
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> list[Run]:
+    """Newest first. Paginate with `cursor` = the last row's
+    "<scheduled_at>|<id>" (keyset, so new rows don't shift pages)."""
     _get_job(session, job_id, tenant)
+    stmt = select(Run).where(Run.job_id == job_id)
+    keyset = _keyset_before(Run.scheduled_at, Run.id, cursor)
+    if keyset is not None:
+        stmt = stmt.where(keyset)
     return session.scalars(
-        select(Run)
-        .where(Run.job_id == job_id)
-        .order_by(Run.scheduled_at.desc())
-        .limit(limit)
+        stmt.order_by(Run.scheduled_at.desc(), Run.id.desc()).limit(limit)
     ).all()
 
 
@@ -293,15 +354,23 @@ def job_stats(
 def list_alerts(
     acknowledged: bool | None = None,
     limit: int = Query(100, ge=1, le=500),
+    cursor: str | None = None,
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> list[Alert]:
-    stmt = select(Alert).order_by(Alert.created_at.desc()).limit(limit)
+    """Newest first. Paginate with `cursor` = the last row's
+    "<created_at>|<id>"."""
+    stmt = select(Alert)
     if acknowledged is not None:
         stmt = stmt.where(Alert.acknowledged.is_(acknowledged))
     if tenant is not None:
         stmt = stmt.where(Alert.job_id.in_(_tenant_job_ids(session, tenant)))
-    return session.scalars(stmt).all()
+    keyset = _keyset_before(Alert.created_at, Alert.id, cursor)
+    if keyset is not None:
+        stmt = stmt.where(keyset)
+    return session.scalars(
+        stmt.order_by(Alert.created_at.desc(), Alert.id.desc()).limit(limit)
+    ).all()
 
 
 @app.post("/alerts/{alert_id}/ack", response_model=AlertOut)
@@ -440,15 +509,40 @@ def delete_eval_case(
     session.commit()
 
 
+def _get_run(session: Session, run_id: str, tenant: Tenant | None) -> Run:
+    run = session.get(Run, run_id)
+    if run is None or (tenant is not None and run.job.tenant_id != tenant.id):
+        raise HTTPException(404, "run not found")
+    return run
+
+
 @app.get("/runs/{run_id}", response_model=RunDetailOut)
 def get_run(
     run_id: str,
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> Run:
-    run = session.get(Run, run_id)
-    if run is None or (tenant is not None and run.job.tenant_id != tenant.id):
-        raise HTTPException(404, "run not found")
+    return _get_run(session, run_id, tenant)
+
+
+@app.post("/runs/{run_id}/cancel", response_model=RunOut)
+def cancel_run(
+    run_id: str,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> Run:
+    """Cancel a queued or running run. A queued run is cancelled immediately;
+    a running one is flagged and the worker stops it cooperatively (the
+    schedule pause only affects future runs, not an in-flight one)."""
+    run = _get_run(session, run_id, tenant)
+    if run.status in TERMINAL_STATUSES:
+        raise HTTPException(409, f"run already {run.status.value}")
+    if run.status == RunStatus.QUEUED:
+        run.status = RunStatus.CANCELLED
+        run.finished_at = datetime.now(timezone.utc)
+    else:  # RUNNING — the worker polls this flag and winds the engine down
+        run.cancel_requested = True
+    session.commit()
     return run
 
 

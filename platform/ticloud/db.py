@@ -30,7 +30,11 @@ def _ensure_new_columns() -> None:
     tables = set(inspector.get_table_names())
 
     new_columns = {
-        "jobs": [("tenant_id", "VARCHAR(32)")],
+        "jobs": [
+            ("tenant_id", "VARCHAR(32)"),
+            ("retry_backoff_s", "INTEGER DEFAULT 0"),
+        ],
+        "runs": [("cancel_requested", "BOOLEAN DEFAULT 0")],
         "tenants": [
             ("monthly_budget_usd", "FLOAT"),
             ("plan", "VARCHAR(50) DEFAULT 'free'"),
