@@ -124,7 +124,7 @@ docs/PLAN.md   product plan & roadmap (zh-TW); docs/LAUNCH.md launch notes
 
 ```bash
 cd platform && python -m pytest      # 45 tests
-python -m ticloud.eval.cli run       # eval-set regression gate
+cd platform && python -m ticloud.eval.cli run  # eval-set regression gate
 ```
 
 ## Roadmap
