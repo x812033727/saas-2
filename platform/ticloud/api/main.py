@@ -1,17 +1,18 @@
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import stripe_billing
 
 from .. import __version__
-from ..billing import month_to_date_cost, tenant_over_budget
+from ..billing import month_to_date_cost, runs_since_filter, tenant_over_budget
 from ..db import SessionLocal, init_db
 from ..eval.failures import cluster_failures
 from ..models import Alert, ApiKey, EvalCase, Job, Lesson, Run, RunStatus, Tenant
@@ -112,21 +113,34 @@ def _tenant_job_ids(session: Session, tenant: Tenant) -> list[str]:
     return list(session.scalars(select(Job.id).where(Job.tenant_id == tenant.id)))
 
 
+def _latest_run_by_job(session: Session, job_ids: list[str]) -> dict[str, Run]:
+    """Most recent run per job in one query (avoids a per-job N+1).
+
+    A window function ranks each job's runs by scheduled_at (id breaks
+    ties); SQLite 3.25+ and Postgres both support it."""
+    if not job_ids:
+        return {}
+    rn = func.row_number().over(
+        partition_by=Run.job_id,
+        order_by=(Run.scheduled_at.desc(), Run.id.desc()),
+    ).label("rn")
+    ranked = select(Run.id, rn).where(Run.job_id.in_(job_ids)).subquery()
+    latest_ids = select(ranked.c.id).where(ranked.c.rn == 1)
+    runs = session.scalars(select(Run).where(Run.id.in_(latest_ids)))
+    return {r.job_id: r for r in runs}
+
+
 @app.get("/overview", response_model=list[JobWithLastRun])
 def overview(
     session: Session = Depends(db), tenant: Tenant | None = Depends(current_tenant)
 ) -> list[JobWithLastRun]:
     """All jobs with their most recent run, for the dashboard home view."""
     jobs = session.scalars(_jobs_stmt(tenant)).all()
+    latest = _latest_run_by_job(session, [j.id for j in jobs])
     out = []
     for job in jobs:
-        last = session.scalars(
-            select(Run)
-            .where(Run.job_id == job.id)
-            .order_by(Run.scheduled_at.desc())
-            .limit(1)
-        ).first()
         item = JobWithLastRun.model_validate(job)
+        last = latest.get(job.id)
         item.last_run = RunOut.model_validate(last) if last else None
         out.append(item)
     return out
@@ -441,12 +455,27 @@ def get_run(
 # --- usage metering ---------------------------------------------------------
 
 
+USAGE_WINDOW_MONTHS = 12
+
+
+def _window_start(now: datetime, months: int) -> datetime:
+    """First of the month `months-1` months back (inclusive window)."""
+    year, month = now.year, now.month - (months - 1)
+    while month <= 0:
+        month += 12
+        year -= 1
+    return datetime(year, month, 1, tzinfo=timezone.utc)
+
+
 def _usage_months(session: Session, job_ids: list[str] | None) -> list[UsagePoint]:
-    """Aggregate run spend per calendar month (UTC), oldest first.
+    """Aggregate run spend per calendar month (UTC), oldest first, over the
+    last USAGE_WINDOW_MONTHS months.
 
     Bucketing happens in Python so SQLite and Postgres behave identically
-    (no dialect-specific date functions)."""
-    stmt = select(Run)
+    (no dialect-specific date functions), but a SQL window filter bounds the
+    scan so it doesn't grow with total run history."""
+    start = _window_start(datetime.now(timezone.utc), USAGE_WINDOW_MONTHS)
+    stmt = select(Run).where(runs_since_filter(start))
     if job_ids is not None:
         stmt = stmt.where(Run.job_id.in_(job_ids))
     buckets: dict[str, UsagePoint] = {}
@@ -570,8 +599,6 @@ def list_api_keys(tenant_id: str, session: Session = Depends(db)) -> list[ApiKey
 
 @admin.post("/keys/{key_id}/revoke", response_model=ApiKeyOut)
 def revoke_api_key(key_id: str, session: Session = Depends(db)) -> ApiKey:
-    from datetime import datetime, timezone
-
     key = session.get(ApiKey, key_id)
     if key is None:
         raise HTTPException(404, "api key not found")
