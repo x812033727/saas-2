@@ -42,7 +42,10 @@ import tempfile
 import traceback
 import uuid
 
-MAX_TEXT = 2000  # trim free-text payload fields so protocol lines stay small
+# Trim free-text payload fields so a protocol line (JSON envelope + UTF-8
+# text, CJK up to 3 bytes/char) stays under PIPE_BUF (4096) — writes below
+# that are atomic, so the adapter never sees an interleaved partial line.
+MAX_TEXT = 1200
 
 
 def emit(obj: dict) -> None:
@@ -67,16 +70,38 @@ def _owner_repo(repo_url: str) -> str | None:
 
 
 def _clone(repo_url: str, dest: str) -> None:
-    clone_url = repo_url
-    token = os.environ.get("GITHUB_TOKEN", "")
-    if token and repo_url.startswith("https://github.com/"):
-        clone_url = repo_url.replace("https://", f"https://x-access-token:{token}@", 1)
-    subprocess.run(
-        ["git", "clone", clone_url, dest], check=True, timeout=300, capture_output=True
-    )
-    # Don't leave the token in the workspace config; Ti's publisher has its
-    # own credential handling for pushes.
-    subprocess.run(["git", "remote", "set-url", "origin", repo_url], cwd=dest, check=True)
+    # The token never goes into argv or the URL: a failed clone stringifies
+    # its command line into the exception (and git echoes the URL on auth
+    # errors), which would leak the credential into run errors and logs.
+    # GIT_ASKPASS hands it to git out-of-band instead.
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    askpass = None
+    try:
+        if env.get("GITHUB_TOKEN") and repo_url.startswith("https://github.com/"):
+            fd, askpass = tempfile.mkstemp(prefix="ticloud-askpass-", suffix=".sh")
+            os.write(
+                fd,
+                b'#!/bin/sh\ncase "$1" in\n'
+                b"Username*) echo x-access-token;;\n"
+                b'Password*) echo "$GITHUB_TOKEN";;\n'
+                b"esac\n",
+            )
+            os.close(fd)
+            os.chmod(askpass, 0o700)
+            env["GIT_ASKPASS"] = askpass
+        result = subprocess.run(
+            ["git", "clone", repo_url, dest],
+            env=env,
+            timeout=300,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"git clone failed: {result.stderr[-800:]}")
+    finally:
+        if askpass:
+            os.unlink(askpass)
     subprocess.run(["git", "config", "user.email", "noreply@anthropic.com"], cwd=dest, check=True)
     subprocess.run(["git", "config", "user.name", "Ti Cloud"], cwd=dest, check=True)
 
@@ -191,13 +216,24 @@ def _make_broadcast(state: dict):
 
 
 async def _run(config: dict) -> int:
+    sid = f"tc{uuid.uuid4().hex[:10]}"
+    workspace = tempfile.mkdtemp(prefix=f"ticloud-{sid}-")
+    try:
+        return await _run_in_workspace(config, sid, workspace)
+    finally:
+        # Failure paths leak clones otherwise — and failures retry, so the
+        # leak compounds. (A SIGKILL still leaks; the scheduler host should
+        # sweep stale ticloud-* temp dirs if that ever matters.)
+        if not config.get("keep_workspace"):
+            shutil.rmtree(workspace, ignore_errors=True)
+
+
+async def _run_in_workspace(config: dict, sid: str, workspace: str) -> int:
     from pathlib import Path
 
     from studio import workflow as workflow_mod
     from studio.orchestrator import StudioSession
 
-    sid = f"tc{uuid.uuid4().hex[:10]}"
-    workspace = tempfile.mkdtemp(prefix=f"ticloud-{sid}-")
     log(f"session {sid}: cloning {config['repo_url']} into {workspace}")
     _clone(config["repo_url"], workspace)
 
@@ -244,9 +280,6 @@ async def _run(config: dict) -> int:
         reason = result.get("incomplete_reason") or state.get("last_error") or "unknown"
         emit({"t": "fatal", "error": f"workshop did not complete: {reason}"[:MAX_TEXT]})
         return 1
-
-    if not config.get("keep_workspace"):
-        shutil.rmtree(workspace, ignore_errors=True)
 
     summary = "Ti workshop completed"
     if data.get("pr_url"):

@@ -223,6 +223,31 @@ def test_ti_requires_repo_and_brief(session, monkeypatch, tmp_path):
     assert "repo_url" in run.error
 
 
+def test_clone_never_exposes_the_token(tmp_path, monkeypatch):
+    """A failed clone must not leak GITHUB_TOKEN into argv or the error
+    (exception strings and git stderr end up in Run.error and the UI)."""
+    from ticloud.engine import ti_runner
+
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_supersecret123")
+    seen = {}
+
+    def fake_run(argv, **kw):
+        if argv[:2] == ["git", "clone"]:
+            seen["argv"] = argv
+            seen["env"] = kw.get("env") or {}
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="fatal: auth failed")
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ti_runner.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError) as err:
+        ti_runner._clone("https://github.com/acme/private", str(tmp_path / "ws"))
+
+    assert "ghp_supersecret123" not in str(err.value)
+    assert "ghp_supersecret123" not in " ".join(seen["argv"])
+    askpass = seen["env"].get("GIT_ASKPASS")
+    assert askpass, "token should be delivered via GIT_ASKPASS, not the URL"
+
+
 @pytest.mark.skipif(
     not Path("/opt/ti/.venv/bin/python").exists(),
     reason="needs a real Ti checkout at /opt/ti",
