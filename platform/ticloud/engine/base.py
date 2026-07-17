@@ -55,6 +55,12 @@ class RunContext:
     def cost_usd(self) -> float:
         return self._run.cost_usd
 
+    @property
+    def previous_error(self) -> str | None:
+        """Error from the failed attempt this run retries (set by the worker),
+        so engines can carry failure context into the next attempt."""
+        return (self._run.result or {}).get("previous_error")
+
     def record_step(
         self,
         role: str,

@@ -106,6 +106,38 @@ curl -X POST localhost:8000/jobs -H 'content-type: application/json' -d '{
 }'
 ```
 
+## Running the flagship Ti engine
+
+The Ti adapter drives a real [Ti](https://github.com/x812033727/Ti)
+multi-expert workshop (PM / engineer / senior / QA collaborating on a real
+repo) as a scheduled job. Point the platform at a Ti checkout and give the
+job a repo and a brief:
+
+```bash
+export TICLOUD_TI_PATH=/path/to/Ti   # a checkout with its own .venv
+
+curl -X POST localhost:8000/jobs -H 'content-type: application/json' -d '{
+  "name": "nightly-repo-patrol",
+  "engine": "ti",
+  "cron": "30 3 * * *",
+  "timeout_s": 5400,
+  "budget_usd": 5.0,
+  "score_threshold": 0.6,
+  "payload": {
+    "repo_url": "https://github.com/you/your-repo",
+    "publish_repo": "you/your-repo",
+    "brief": "Patrol the repo: find one worthwhile bug or improvement, fix it with tests, and open a PR."
+  }
+}'
+```
+
+The workshop runs headlessly in a subprocess using Ti's own interpreter
+(dependencies stay isolated), streams its stages, critic verdicts, and
+token/cost usage into the run trace, and reports the PR it opened in the
+run result. Budget, timeout, retry-with-failure-context, scoring, and the
+knowledge flywheel (job lessons are folded into the workshop brief; every
+failure becomes a lesson) all apply — same as any other engine.
+
 ## Layout
 
 ```
@@ -123,16 +155,12 @@ docs/PLAN.md   product plan & roadmap (zh-TW); docs/LAUNCH.md launch notes
 ## Tests
 
 ```bash
-cd platform && python -m pytest      # 45 tests
+cd platform && python -m pytest      # 55 tests
 python -m ticloud.eval.cli run       # eval-set regression gate
 ```
 
 ## Roadmap
 
-- **Ti engine adapter** — drive the [Ti](https://github.com/x812033727/Ti)
-  multi-expert workshop (PM / engineer / senior / QA collaborating on real
-  repos) as the flagship engine; the `AgentEngine` protocol means any
-  agent can plug in.
 - **Semantic failure clustering** — embedding-based grouping on top of the
   deterministic signatures (cloud tier).
 - **Multi-tenancy + hosted cloud** — managed schedules, team workspaces,
