@@ -67,7 +67,8 @@ schedule → run → score every run → gate (alert / auto-pause)
     eval-set through the real engine + scorers and exits non-zero on any
     case below its `min_score` — wire it into CI
     (`.github/workflows/eval-gate.yml`) and a failure mode stays red until
-    it's actually fixed.
+    it's actually fixed. Other repos add it in one step with the composite
+    action: `uses: x812033727/saas-2@main` with a `database-url` input.
 
 | Drift view (gate drawn in) | Scorer breakdown per run |
 |---|---|

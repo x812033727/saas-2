@@ -1,0 +1,41 @@
+name: "Ti Cloud eval gate"
+description: "Replay a Ti Cloud eval-set through the real engine + scorers and fail the job on any regression."
+author: "Ti Cloud"
+branding:
+  icon: "check-circle"
+  color: "blue"
+inputs:
+  database-url:
+    description: "TICLOUD_DATABASE_URL of the eval database to replay (e.g. a committed SQLite file or a Postgres URL)."
+    required: true
+  min-score:
+    description: "Override every case's min_score threshold (optional)."
+    required: false
+    default: ""
+  job:
+    description: "Only replay eval cases sourced from this job id (optional)."
+    required: false
+    default: ""
+  ref:
+    description: "Ti Cloud git ref to install (tag/branch/sha)."
+    required: false
+    default: "main"
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Install Ti Cloud
+      shell: bash
+      run: pip install "ticloud @ git+https://github.com/x812033727/saas-2.git@${{ inputs.ref }}#subdirectory=platform"
+    - name: Run eval gate
+      shell: bash
+      env:
+        TICLOUD_DATABASE_URL: ${{ inputs.database-url }}
+      run: |
+        args=()
+        [ -n "${{ inputs.min-score }}" ] && args+=(--min-score "${{ inputs.min-score }}")
+        [ -n "${{ inputs.job }}" ] && args+=(--job "${{ inputs.job }}")
+        python -m ticloud.eval.cli run "${args[@]}"
