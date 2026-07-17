@@ -191,6 +191,12 @@ monthly run/cost/token totals and `GET /admin/usage` is the cross-tenant
 billing export. Keys are stored hashed and revocable
 (`POST /admin/keys/{id}/revoke`).
 
+`PATCH /admin/tenants/{id}` sets a tenant's own alert webhook
+(`webhook_url` — alerts route there instead of the global one; a job can
+override with its own `webhook_url`) and a concurrency cap
+(`max_concurrent_runs`, so one tenant's burst can't monopolise workers).
+A global cap is `TICLOUD_MAX_CONCURRENT_RUNS`.
+
 Give a tenant a monthly spend cap with
 `PUT /admin/tenants/{id}/budget` (`{"monthly_budget_usd": 25}`; `null`
 clears it). Once this month's spend across the tenant's jobs reaches the

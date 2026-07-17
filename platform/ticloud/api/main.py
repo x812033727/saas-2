@@ -51,8 +51,9 @@ from .schemas import (
     TemplateOut,
     TenantBudget,
     TenantCreate,
-    TenantPlan,
     TenantOut,
+    TenantPlan,
+    TenantUpdate,
     UsageOut,
     UsagePoint,
 )
@@ -716,6 +717,18 @@ def _get_tenant(session: Session, tenant_id: str) -> Tenant:
     tenant = session.get(Tenant, tenant_id)
     if tenant is None:
         raise HTTPException(404, "tenant not found")
+    return tenant
+
+
+@admin.patch("/tenants/{tenant_id}", response_model=TenantOut)
+def update_tenant(
+    tenant_id: str, body: TenantUpdate, session: Session = Depends(db)
+) -> Tenant:
+    """Update a tenant's operational settings (alert webhook, concurrency cap)."""
+    tenant = _get_tenant(session, tenant_id)
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(tenant, field, value)
+    session.commit()
     return tenant
 
 

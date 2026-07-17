@@ -92,6 +92,11 @@ class Tenant(Base):
     plan: Mapped[str] = mapped_column(String(50), default="free")
     subscription_status: Mapped[str] = mapped_column(String(30), default="none")
     stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Where this tenant's alerts are delivered (Slack-compatible); falls back
+    # to the global TICLOUD_WEBHOOK_URL when unset.
+    webhook_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Cap on this tenant's simultaneously RUNNING runs; None = unlimited.
+    max_concurrent_runs: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
     api_keys: Mapped[list["ApiKey"]] = relationship(
@@ -157,6 +162,8 @@ class Job(Base):
     # When set, every run waits for a human to approve it before the engine
     # executes ("never runs unreviewed").
     approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Per-job alert webhook override; falls back to the tenant's, then global.
+    webhook_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Quality gate: every finished run is scored 0..1; scoring below the
     # threshold raises an alert, and on_low_score="pause" also pauses the

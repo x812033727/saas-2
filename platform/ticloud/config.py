@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # Alert webhook (generic JSON POST, Slack incoming-webhook compatible).
     webhook_url: str | None = None
 
+    # Global cap on simultaneously RUNNING runs across all workers; 0 =
+    # unlimited. Per-tenant caps (Tenant.max_concurrent_runs) apply on top.
+    max_concurrent_runs: int = 0
+
     # Multi-tenant hosted mode: "off" (default, single-tenant self-host —
     # no auth, jobs unowned) or "required" (every data route needs a tenant
     # API key and sees only that tenant's jobs/runs/alerts).

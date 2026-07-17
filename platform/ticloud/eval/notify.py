@@ -12,9 +12,21 @@ import urllib.request
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Alert
+from ..models import Alert, Job
 
 log = logging.getLogger(__name__)
+
+
+def _resolve_webhook_url(session: Session, job_id: str) -> str | None:
+    """Per-job override → owning tenant's URL → global TICLOUD_WEBHOOK_URL,
+    so each hosted tenant gets its own destination instead of one shared one."""
+    job = session.get(Job, job_id)
+    if job is not None:
+        if job.webhook_url:
+            return job.webhook_url
+        if job.tenant is not None and job.tenant.webhook_url:
+            return job.tenant.webhook_url
+    return getattr(settings, "webhook_url", None)
 
 
 def raise_alert(
@@ -27,12 +39,11 @@ def raise_alert(
     alert = Alert(job_id=job_id, run_id=run_id, kind=kind, message=message)
     session.add(alert)
     session.commit()
-    _push_webhook(alert)
+    _push_webhook(alert, _resolve_webhook_url(session, job_id))
     return alert
 
 
-def _push_webhook(alert: Alert) -> None:
-    url = getattr(settings, "webhook_url", None)
+def _push_webhook(alert: Alert, url: str | None) -> None:
     if not url:
         return
     payload = {
