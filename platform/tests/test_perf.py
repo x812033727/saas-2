@@ -84,6 +84,15 @@ def test_overview_job_without_runs(session, client):
 # --- usage window bound ------------------------------------------------------
 
 
+def test_usage_current_month_cost_in_self_host(session, client):
+    """Self-host (no tenant) reports this month's spend, not a hardcoded 0."""
+    job = make_job(session)
+    _run(session, job.id, cost=2.5, scheduled=datetime.now(timezone.utc))
+    u = client.get("/usage").json()
+    assert u["tenant_id"] is None
+    assert u["current_month_cost_usd"] == pytest.approx(2.5)
+
+
 def test_usage_excludes_runs_older_than_window(session, client):
     job = make_job(session)
     now = datetime.now(timezone.utc)

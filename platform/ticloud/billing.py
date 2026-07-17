@@ -38,23 +38,24 @@ def tenant_job_ids(session: Session, tenant_id: str) -> list[str]:
 
 
 def month_to_date_cost(
-    session: Session, job_ids: list[str], now: datetime | None = None
+    session: Session, job_ids: list[str] | None, now: datetime | None = None
 ) -> float:
-    """Sum of run cost across job_ids for the current UTC calendar month.
+    """Sum of run cost for the current UTC calendar month.
 
-    Aggregates in SQL with a date filter (backed by the Run(job_id,
-    scheduled_at) index), so this stays flat as run history grows — it runs
-    on the hot path (every trigger, every scheduler tick, every /usage)."""
-    if not job_ids:
+    job_ids=None means all jobs (self-host); an empty list means a tenant
+    that owns no jobs → 0. Aggregates in SQL with a date filter (backed by
+    the Run(job_id, scheduled_at) index), so it stays flat as run history
+    grows — it runs on the hot path (every trigger, scheduler tick, /usage).
+    """
+    if job_ids is not None and not job_ids:
         return 0.0
     now = now or datetime.now(timezone.utc)
-    total = session.scalar(
-        select(func.coalesce(func.sum(Run.cost_usd), 0.0)).where(
-            Run.job_id.in_(job_ids),
-            runs_since_filter(_month_start(now)),
-        )
+    stmt = select(func.coalesce(func.sum(Run.cost_usd), 0.0)).where(
+        runs_since_filter(_month_start(now))
     )
-    return round(total or 0.0, 6)
+    if job_ids is not None:
+        stmt = stmt.where(Run.job_id.in_(job_ids))
+    return round(session.scalar(stmt) or 0.0, 6)
 
 
 def tenant_over_budget(
