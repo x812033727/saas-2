@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -16,6 +16,8 @@ from .. import __version__
 from ..billing import month_to_date_cost, runs_since_filter, tenant_over_budget
 from ..db import SessionLocal, init_db
 from ..eval.failures import cluster_failures
+from ..config import settings
+from ..metrics import configure_logging, render_metrics
 from ..models import (
     TERMINAL_STATUSES,
     Alert,
@@ -61,6 +63,8 @@ from .schemas import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.log_json:
+        configure_logging(True)
     init_db()
     yield
 
@@ -91,6 +95,14 @@ log = logging.getLogger(__name__)
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "version": __version__}
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics(session: Session = Depends(db)) -> PlainTextResponse:
+    """Prometheus exposition: queue depth, runs by status, jobs, unacked
+    alerts, cumulative spend/tokens. Unauthenticated (aggregate counts only,
+    no per-tenant data) so a scraper can reach it."""
+    return PlainTextResponse(render_metrics(session))
 
 
 @app.post("/billing/stripe/webhook", include_in_schema=False)

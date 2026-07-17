@@ -240,6 +240,13 @@ deploy/        Dockerfile + docker-compose (Postgres + API + worker)
 docs/PLAN.md   product plan & roadmap (zh-TW); docs/LAUNCH.md launch notes
 ```
 
+## Operating it
+
+`GET /metrics` is Prometheus exposition (queue depth, runs by status, jobs,
+unacknowledged alerts, cumulative spend/tokens) — point a scraper at it.
+Set `TICLOUD_LOG_JSON=1` for one-JSON-object-per-line logs (with run/job
+ids) instead of plain text.
+
 ## Tests
 
 ```bash
