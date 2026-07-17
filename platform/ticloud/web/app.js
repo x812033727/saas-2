@@ -351,6 +351,45 @@ async function refreshAlertCount() {
   } catch { /* topbar badge is best-effort */ }
 }
 
+async function usageView() {
+  const u = await api("/usage");
+  const months = u.months || [];
+  const spent = u.current_month_cost_usd ?? 0;
+  const budget = u.monthly_budget_usd;
+  const pct = budget ? Math.min(100, Math.round((spent / budget) * 100)) : null;
+
+  const banner = u.over_budget
+    ? `<div class="card" style="border-color:var(--danger,#c0392b)"><strong>⚠ Over budget</strong> —
+       new runs are blocked until next month or the cap is raised.</div>`
+    : "";
+
+  const cap = budget != null
+    ? `<div class="card"><div class="sub">This month</div>
+        <div style="font-size:22px;font-weight:600">${fmtMoney(spent)} <span style="color:var(--muted);font-size:15px">/ ${fmtMoney(budget)} cap (${pct}%)</span></div>
+        <div style="height:8px;background:var(--line,#eee);border-radius:4px;overflow:hidden;margin-top:8px">
+          <div style="height:100%;width:${pct}%;background:${u.over_budget ? "var(--danger,#c0392b)" : "var(--series-1,#3b82f6)"}"></div>
+        </div></div>`
+    : `<div class="card"><div class="sub">This month</div>
+        <div style="font-size:22px;font-weight:600">${fmtMoney(spent)}</div>
+        <div style="color:var(--muted);font-size:13px;margin-top:4px">No spend cap set.</div></div>`;
+
+  const rows = months.slice().reverse().map((m) => `
+    <tr><td>${esc(m.month)}</td><td>${m.runs}</td><td>${m.succeeded}</td>
+        <td>${fmtMoney(m.cost_usd)}</td><td>${m.tokens_in} / ${m.tokens_out}</td></tr>`).join("");
+
+  app.innerHTML = `
+    <h1>Usage${u.tenant_id ? "" : " (self-host)"}</h1>
+    <div class="sub">monthly run spend from the platform's own accounting — judge spend excluded</div>
+    ${banner}
+    ${cap}
+    <div class="card">
+      ${months.length ? `<table>
+        <thead><tr><th>Month</th><th>Runs</th><th>Succeeded</th><th>Cost</th><th>Tokens in/out</th></tr></thead>
+        <tbody>${rows}</tbody></table>`
+      : `<div class="empty">No usage yet.</div>`}
+    </div>`;
+}
+
 /* ---------- router & polling ---------- */
 
 function schedulePoll(ms) {
@@ -365,6 +404,7 @@ async function render() {
   refreshAlertCount();
   try {
     if (view === "runs" && id) await runDetailView(id);
+    else if (view === "usage") { await usageView(); schedulePoll(15000); }
     else if (view === "failures") { await failuresView(); schedulePoll(6000); }
     else if (view === "alerts") { await alertsView(); schedulePoll(5000); }
     else if (view === "jobs" && id) { await jobDetailView(id); schedulePoll(3000); }

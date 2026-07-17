@@ -688,7 +688,7 @@ def usage(
         tenant_id=tenant.id if tenant is not None else None,
         months=_usage_months(session, job_ids),
         monthly_budget_usd=budget,
-        current_month_cost_usd=month_to_date_cost(session, job_ids) if job_ids is not None else 0.0,
+        current_month_cost_usd=month_to_date_cost(session, job_ids),
         over_budget=tenant_over_budget(session, tenant) if tenant is not None else False,
     )
 
