@@ -44,7 +44,7 @@ schedule → run → score every run → gate (alert / auto-pause)
   rule-based scorers (completion, **trajectory health** — stuck-loop and
   review-verdict checks that catch "answer looked fine, process was broken"
   silent failures — and cost anomaly vs the job's own history) plus an
-  optional Claude **LLM judge** (`pip install "platform[judge]"` +
+  optional Claude **LLM judge** (`pip install -e "platform[judge]"` +
   `ANTHROPIC_API_KEY`). Score below the job's `score_threshold` → alert
   (webhook via `TICLOUD_WEBHOOK_URL`, Slack-compatible) and, with
   `on_low_score: "pause"`, the schedule **auto-pauses**.
