@@ -262,9 +262,11 @@ def worker_loop(stop: threading.Event | None = None) -> None:
 
 
 def main() -> None:  # pragma: no cover - process entrypoint
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    from ..config import settings
     from ..db import init_db
+    from ..metrics import configure_logging
 
+    configure_logging(settings.log_json)
     init_db()
     log.info("ticloud worker started")
     worker_loop()

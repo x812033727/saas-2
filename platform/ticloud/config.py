@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # unlimited. Per-tenant caps (Tenant.max_concurrent_runs) apply on top.
     max_concurrent_runs: int = 0
 
+    # Emit one-JSON-object-per-line logs (with run/job/tenant ids) instead of
+    # plain text — for shipping to a log aggregator.
+    log_json: bool = False
+
     # Multi-tenant hosted mode: "off" (default, single-tenant self-host —
     # no auth, jobs unowned) or "required" (every data route needs a tenant
     # API key and sees only that tenant's jobs/runs/alerts).
