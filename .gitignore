@@ -33,3 +33,4 @@ ENV/
 .gitmodules
 .ripgreprc
 .mcp.json
+.ticloud-attachments/
