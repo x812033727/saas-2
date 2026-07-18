@@ -27,6 +27,7 @@ ENV/
 .bash_profile
 .profile
 .tmp/
+.local/
 .zshrc
 .zprofile
 .gitconfig
