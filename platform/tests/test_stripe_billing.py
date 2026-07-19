@@ -115,6 +115,36 @@ def test_subscription_past_due_holds_at_free(client, admin_mode, session):
     assert row.monthly_budget_usd == stripe_billing.PLAN_BUDGETS["free"]
 
 
+def test_subscription_updated_without_status_holds_at_default_plan(client, admin_mode, session):
+    t = _tenant(client)
+    _post(client, _event("checkout.session.completed",
+                         {"client_reference_id": t["id"], "customer": "cus_missing", "metadata": {"plan": "team"}}))
+    resp = _post(client, _event("customer.subscription.updated",
+                                {"customer": "cus_missing", "metadata": {"plan": "team"}}))
+    assert resp.status_code == 200
+    assert resp.json()["result"] == "updated:none"
+
+    row = session.get(Tenant, t["id"])
+    assert row.plan == stripe_billing.DEFAULT_PLAN
+    assert row.subscription_status != "active"
+    assert row.monthly_budget_usd == stripe_billing.PLAN_BUDGETS[stripe_billing.DEFAULT_PLAN]
+
+
+def test_subscription_updated_active_applies_paid_plan(client, admin_mode, session):
+    t = _tenant(client)
+    _post(client, _event("checkout.session.completed",
+                         {"client_reference_id": t["id"], "customer": "cus_active", "metadata": {"plan": "free"}}))
+    resp = _post(client, _event("customer.subscription.updated",
+                                {"customer": "cus_active", "status": "active", "metadata": {"plan": "team"}}))
+    assert resp.status_code == 200
+    assert resp.json()["result"] == "updated:active"
+
+    row = session.get(Tenant, t["id"])
+    assert row.plan == "team"
+    assert row.subscription_status == "active"
+    assert row.monthly_budget_usd == stripe_billing.PLAN_BUDGETS["team"]
+
+
 def test_subscription_deleted_downgrades_to_free(client, admin_mode, session):
     t = _tenant(client)
     _post(client, _event("checkout.session.completed",

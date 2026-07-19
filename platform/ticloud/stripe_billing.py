@@ -121,12 +121,12 @@ def handle_event(session: Session, event: dict) -> str:
         tenant = _tenant_by_customer(session, obj.get("customer"))
         if tenant is None:
             return "ignored"
-        status = obj.get("status", "active")
+        status = obj.get("status")
         if status in _ACTIVE_STATUSES:
             apply_plan(tenant, _plan_from_object(obj), status)
         else:
-            # past_due / unpaid / incomplete → hold at free-tier spend.
-            apply_plan(tenant, DEFAULT_PLAN, status)
+            # past_due / unpaid / incomplete / missing -> hold at free-tier spend.
+            apply_plan(tenant, DEFAULT_PLAN, status or "none")
         session.commit()
         return f"updated:{tenant.subscription_status}"
 
