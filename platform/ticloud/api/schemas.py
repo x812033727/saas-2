@@ -1,10 +1,20 @@
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
 
 from ..config import settings
 from ..engine import ENGINES
 from ..scheduler.cron import validate_cron
+
+
+def _validate_webhook_url(v: str | None) -> str | None:
+    if v is None:
+        return None
+    parsed = urlsplit(v)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or any(c.isspace() for c in v):
+        raise ValueError("webhook_url must be an http(s) URL")
+    return v
 
 
 class JobCreate(BaseModel):
@@ -29,6 +39,11 @@ class JobCreate(BaseModel):
         if v not in ("alert", "pause"):
             raise ValueError("on_low_score must be 'alert' or 'pause'")
         return v
+
+    @field_validator("webhook_url")
+    @classmethod
+    def _valid_webhook_url(cls, v: str | None) -> str | None:
+        return _validate_webhook_url(v)
 
     @field_validator("cron")
     @classmethod
@@ -69,6 +84,11 @@ class JobUpdate(BaseModel):
         if v is not None and v not in ("alert", "pause"):
             raise ValueError("on_low_score must be 'alert' or 'pause'")
         return v
+
+    @field_validator("webhook_url")
+    @classmethod
+    def _valid_webhook_url(cls, v: str | None) -> str | None:
+        return _validate_webhook_url(v)
 
     @field_validator("cron")
     @classmethod
@@ -274,6 +294,11 @@ class TenantUpdate(BaseModel):
 
     webhook_url: str | None = Field(default=None, max_length=500)
     max_concurrent_runs: int | None = Field(default=None, ge=1)
+
+    @field_validator("webhook_url")
+    @classmethod
+    def _valid_webhook_url(cls, v: str | None) -> str | None:
+        return _validate_webhook_url(v)
 
 
 class TenantBudget(BaseModel):

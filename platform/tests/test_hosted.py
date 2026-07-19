@@ -59,6 +59,25 @@ def test_job_webhook_url_via_api(session, client):
     assert cleared["webhook_url"] is None
 
 
+def test_create_job_rejects_invalid_webhook_url(client):
+    resp = client.post(
+        "/jobs",
+        json={
+            "name": "bad-webhook",
+            "engine": "offline",
+            "cron": "0 2 * * *",
+            "webhook_url": "ftp://job.example",
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_patch_job_rejects_invalid_webhook_url(client):
+    job = create_job(client)
+    resp = client.patch(f"/jobs/{job['id']}", json={"webhook_url": "not-a-url"})
+    assert resp.status_code == 422
+
+
 # --- B7 concurrency caps -----------------------------------------------------
 
 
@@ -121,3 +140,13 @@ def test_admin_patch_tenant_settings(client, admin_mode):
     assert updated["max_concurrent_runs"] == 3
     assert client.patch("/admin/tenants/nope", json={"max_concurrent_runs": 1}, headers=ADMIN).status_code == 404
     assert client.patch(f"/admin/tenants/{t['id']}", json={"max_concurrent_runs": 0}, headers=ADMIN).status_code == 422
+
+
+def test_admin_patch_tenant_rejects_invalid_webhook_url(client, admin_mode):
+    t = client.post("/admin/tenants", json={"name": "invalid-webhook"}, headers=ADMIN).json()
+    resp = client.patch(
+        f"/admin/tenants/{t['id']}",
+        json={"webhook_url": "https://bad host.example"},
+        headers=ADMIN,
+    )
+    assert resp.status_code == 422
