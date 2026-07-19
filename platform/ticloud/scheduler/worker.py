@@ -33,6 +33,11 @@ GRACE_PERIOD_S = 5.0
 CANCEL_POLL_S = 2.0
 
 
+def _last_error_line(error: str | None, limit: int) -> str:
+    lines = (error or "").splitlines()
+    return lines[-1][:limit] if lines else ""
+
+
 def _cancel_requested(run_id: str) -> bool:
     """Read Run.cancel_requested on a fresh session so the worker sees the
     API's commit from another connection (avoids a stale read snapshot)."""
@@ -128,7 +133,7 @@ def execute_run(run_id: str) -> RunStatus:
                 job.id,
                 kind="run_failed",
                 message=f"job '{job.name}' failed after {run.attempt} attempt(s): "
-                + (run.error or "").splitlines()[-1][:300],
+                + _last_error_line(run.error, 300),
                 run_id=run.id,
             )
             _score_and_gate(session, run)
@@ -183,7 +188,7 @@ def _record_failure_lesson(ctx: RunContext, run: Run) -> None:
             content=(
                 f"Run failed at '{last_step}' (attempt {run.attempt}): "
                 f"{normalize_error(run.error or '')}. "
-                f"Last error detail: {(run.error or '').splitlines()[-1][:500]}"
+                f"Last error detail: {_last_error_line(run.error, 500)}"
             ),
         )
     except Exception:  # noqa: BLE001 - knowledge capture must not break the worker

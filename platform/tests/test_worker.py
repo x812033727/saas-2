@@ -2,7 +2,7 @@ from sqlalchemy import select
 
 from ticloud.models import Run, RunStatus
 from ticloud.scheduler.queue import claim_next_run, enqueue_manual
-from ticloud.scheduler.worker import execute_run
+from ticloud.scheduler.worker import _last_error_line, execute_run
 
 from test_scheduler import make_job
 
@@ -14,6 +14,22 @@ def run_job_once(session, **job_kw) -> Run:
     execute_run(run.id)
     session.expire_all()
     return session.get(Run, run.id)
+
+
+def test_last_error_line_handles_none():
+    assert _last_error_line(None, 300) == ""
+
+
+def test_last_error_line_handles_empty_string():
+    assert _last_error_line("", 300) == ""
+
+
+def test_last_error_line_uses_last_line():
+    assert _last_error_line("first\nsecond\nlast", 300) == "last"
+
+
+def test_last_error_line_truncates_long_line():
+    assert _last_error_line("a" * 600, 500) == "a" * 500
 
 
 def test_offline_run_succeeds_with_full_trace(session):
