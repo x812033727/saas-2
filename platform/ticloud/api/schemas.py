@@ -1,20 +1,11 @@
 from datetime import datetime
-from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator
 
 from ..config import settings
 from ..engine import ENGINES
 from ..scheduler.cron import validate_cron
-
-
-def _validate_webhook_url(v: str | None) -> str | None:
-    if v is None:
-        return None
-    parsed = urlsplit(v)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or any(c.isspace() for c in v):
-        raise ValueError("webhook_url must be an http(s) URL")
-    return v
+from ..validation import validate_webhook_url
 
 
 class JobCreate(BaseModel):
@@ -43,7 +34,7 @@ class JobCreate(BaseModel):
     @field_validator("webhook_url")
     @classmethod
     def _valid_webhook_url(cls, v: str | None) -> str | None:
-        return _validate_webhook_url(v)
+        return validate_webhook_url(v)
 
     @field_validator("cron")
     @classmethod
@@ -88,7 +79,7 @@ class JobUpdate(BaseModel):
     @field_validator("webhook_url")
     @classmethod
     def _valid_webhook_url(cls, v: str | None) -> str | None:
-        return _validate_webhook_url(v)
+        return validate_webhook_url(v)
 
     @field_validator("cron")
     @classmethod
@@ -298,7 +289,7 @@ class TenantUpdate(BaseModel):
     @field_validator("webhook_url")
     @classmethod
     def _valid_webhook_url(cls, v: str | None) -> str | None:
-        return _validate_webhook_url(v)
+        return validate_webhook_url(v)
 
 
 class TenantBudget(BaseModel):

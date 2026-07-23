@@ -46,6 +46,19 @@ def _trace_summary(run: Run) -> str:
     return "\n".join(lines)
 
 
+def _parse_message(client, **kwargs):
+    parser = getattr(getattr(client, "messages", None), "parse", None)
+    if parser is not None:
+        return parser(**kwargs)
+
+    beta_messages = getattr(getattr(client, "beta", None), "messages", None)
+    beta_parser = getattr(beta_messages, "parse", None)
+    if beta_parser is not None:
+        return beta_parser(**kwargs)
+
+    raise RuntimeError("anthropic SDK does not provide messages.parse or beta.messages.parse")
+
+
 @register("judge")
 def judge(run: Run, session: Session, cfg: dict) -> ScoreResult | None:
     if not cfg.get("enabled", False):
@@ -61,7 +74,8 @@ def judge(run: Run, session: Session, cfg: dict) -> ScoreResult | None:
 
     client = anthropic.Anthropic()
     model = cfg.get("model", DEFAULT_JUDGE_MODEL)
-    response = client.messages.parse(
+    response = _parse_message(
+        client,
         model=model,
         max_tokens=2048,
         system=(
