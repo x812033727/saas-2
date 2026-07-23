@@ -2,8 +2,10 @@ import pytest
 from pydantic import ValidationError
 
 from ticloud.api.schemas import JobCreate, JobUpdate, TenantUpdate
-from ticloud.config import Settings
+from ticloud.config import Settings, settings
 from ticloud.validation import validate_webhook_url
+
+from test_api import create_job
 
 
 @pytest.mark.parametrize(
@@ -51,3 +53,42 @@ def test_settings_rejects_webhook_url_with_empty_host(monkeypatch):
 def test_api_webhook_schemas_reject_empty_host(schema_factory):
     with pytest.raises(ValidationError):
         schema_factory("https://:443/alert")
+
+
+def test_create_job_endpoint_rejects_empty_host_webhook(client):
+    resp = client.post(
+        "/jobs",
+        json={
+            "name": "qa-empty-host-create",
+            "engine": "offline",
+            "cron": "0 2 * * *",
+            "webhook_url": "https://:443/alert",
+        },
+    )
+
+    assert resp.status_code == 422, resp.text
+
+
+def test_patch_job_endpoint_rejects_empty_host_webhook(client):
+    job = create_job(client, name="qa-empty-host-patch")
+
+    resp = client.patch(f"/jobs/{job['id']}", json={"webhook_url": "https://@/alert"})
+
+    assert resp.status_code == 422, resp.text
+
+
+def test_admin_tenant_endpoint_rejects_empty_host_webhook(client, monkeypatch):
+    monkeypatch.setattr(settings, "admin_token", "qa-admin-secret")
+    tenant = client.post(
+        "/admin/tenants",
+        json={"name": "qa-empty-host-tenant"},
+        headers={"Authorization": "Bearer qa-admin-secret"},
+    ).json()
+
+    resp = client.patch(
+        f"/admin/tenants/{tenant['id']}",
+        json={"webhook_url": "https://:443/alert"},
+        headers={"Authorization": "Bearer qa-admin-secret"},
+    )
+
+    assert resp.status_code == 422, resp.text
