@@ -7,7 +7,7 @@ def validate_webhook_url(value: str | None) -> str | None:
     parsed = urlsplit(value)
     if (
         parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
+        or not parsed.hostname
         or any(c.isspace() for c in value)
     ):
         raise ValueError("webhook_url must be an http(s) URL")
