@@ -1,3 +1,6 @@
+import sys
+from types import SimpleNamespace
+
 from sqlalchemy import select
 
 from ticloud.eval import score_run
@@ -113,6 +116,37 @@ def test_judge_skipped_without_api_key(session, monkeypatch):
     run = run_job_once(session, scorers={"judge": {"enabled": True}})
     assert "judge" not in {s.scorer for s in run.scores}
     assert run.score is not None  # rule scorers still produced a baseline
+
+
+def test_judge_uses_beta_parse_when_messages_parse_missing(session, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    seen = {}
+
+    def parse(**kwargs):
+        seen["called"] = True
+        verdict = kwargs["output_format"](
+            score=0.82,
+            reasoning="clean trajectory",
+            failure_modes=[],
+        )
+        return SimpleNamespace(
+            parsed_output=verdict,
+            usage=SimpleNamespace(input_tokens=11, output_tokens=5),
+        )
+
+    class FakeAnthropicClient:
+        def __init__(self):
+            self.beta = SimpleNamespace(messages=SimpleNamespace(parse=parse))
+
+    monkeypatch.setitem(sys.modules, "anthropic", SimpleNamespace(Anthropic=FakeAnthropicClient))
+
+    run = run_job_once(session, scorers={"judge": {"enabled": True}})
+    judge_score = next(s for s in run.scores if s.scorer == "judge")
+
+    assert seen["called"] is True
+    assert judge_score.score == 0.82
+    assert judge_score.passed is True
+    assert judge_score.detail["judge_tokens"] == {"in": 11, "out": 5}
 
 
 def test_retry_pending_defers_final_alert(session):

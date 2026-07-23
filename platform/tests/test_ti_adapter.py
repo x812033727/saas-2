@@ -170,7 +170,7 @@ emit({"t": "step", "role": "team", "kind": "publish", "name": "publish results",
       "output": {"ok": True, "pr_url": "https://github.com/acme/widgets/pull/9",
                  "branch": "ti-studio/x"}})
 emit({"t": "cost", "cost_usd": 999.0, "tokens_in": 1, "tokens_out": 1})
-time.sleep(60)
+sys.exit(0)
 """
     )
     run = run_job_once(session, engine="ti", payload=TI_PAYLOAD, budget_usd=1.0)

@@ -1,7 +1,9 @@
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .validation import validate_webhook_url as _validate_webhook_url
 
 
 class Settings(BaseSettings):
@@ -28,7 +30,7 @@ class Settings(BaseSettings):
     ti_path: str | None = None
 
     # Alert webhook (generic JSON POST, Slack incoming-webhook compatible).
-    webhook_url: str | None = None
+    webhook_url: str | None = Field(default=None, max_length=500)
 
     # Global cap on simultaneously RUNNING runs across all workers; 0 =
     # unlimited. Per-tenant caps (Tenant.max_concurrent_runs) apply on top.
@@ -59,6 +61,11 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return value.strip().lower()
         return value
+
+    @field_validator("webhook_url")
+    @classmethod
+    def validate_webhook_url(cls, value: str | None) -> str | None:
+        return _validate_webhook_url(value)
 
 
 settings = Settings()
