@@ -42,6 +42,10 @@ class SignatureError(Exception):
     """Raised when a Stripe webhook signature fails verification."""
 
 
+class StripeSdkMissing(RuntimeError):
+    """Raised when signed webhook verification is configured without stripe."""
+
+
 def parse_event(payload: bytes, sig_header: str | None) -> dict:
     """Verify (if a secret is configured) and return the event as a dict.
 
@@ -54,7 +58,7 @@ def parse_event(payload: bytes, sig_header: str | None) -> dict:
     try:
         import stripe
     except ImportError as e:  # pragma: no cover - env-dependent
-        raise RuntimeError(
+        raise StripeSdkMissing(
             "TICLOUD_STRIPE_WEBHOOK_SECRET is set but the Stripe SDK is not "
             "installed; `pip install \"platform[billing]\"`."
         ) from e

@@ -194,6 +194,29 @@ def test_bad_signature_rejected(client, monkeypatch):
     assert "signature" in resp.json()["detail"]
 
 
+def test_missing_stripe_sdk_with_secret_is_clear_503(client, monkeypatch):
+    monkeypatch.setattr(settings, "stripe_webhook_secret", "whsec_test")
+
+    def boom(payload, sig):
+        raise stripe_billing.StripeSdkMissing("Stripe SDK is not installed")
+
+    monkeypatch.setattr(stripe_billing, "parse_event", boom)
+    resp = _post(client, _event("checkout.session.completed", {}))
+    assert resp.status_code == 503
+    assert "Stripe SDK" in resp.json()["detail"]
+
+
+def test_unexpected_webhook_runtime_error_is_not_masked(client, monkeypatch):
+    monkeypatch.setattr(settings, "stripe_webhook_secret", "whsec_test")
+
+    def boom(payload, sig):
+        raise RuntimeError("database adapter exploded")
+
+    monkeypatch.setattr(stripe_billing, "parse_event", boom)
+    with pytest.raises(RuntimeError, match="database adapter exploded"):
+        _post(client, _event("checkout.session.completed", {}))
+
+
 # --- admin manual plan (comp accounts / no Stripe) ---------------------------
 
 
