@@ -17,6 +17,27 @@ def test_ui_serves_dashboard(client):
     assert client.get("/ui/style.css").status_code == 200
 
 
+def test_ui_exposes_approval_controls(client):
+    index = client.get("/ui/").text
+    app_js = client.get("/ui/app.js").text
+
+    assert "#/approvals" in index
+    assert 'name="approval_required"' in app_js
+    assert 'api("/approvals")' in app_js
+    assert 'data-runact="approve"' in app_js
+    assert 'data-runact="reject"' in app_js
+
+
+def test_ui_exposes_job_settings_editor(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert 'class="jobsettings"' in app_js
+    assert 'method: "PATCH"' in app_js
+    assert "`/jobs/${id}`" in app_js
+    assert 'name="approval_required"' in app_js
+    assert 'name="webhook_url"' in app_js
+
+
 def test_overview_includes_last_run(client):
     job = create_job(client, cron=None)
     create_job(client, name="second-job", cron=None)

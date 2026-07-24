@@ -131,6 +131,23 @@ def test_eval_cli_reuses_eval_job(session):
     assert len(eval_jobs[0].runs) == 2  # history accumulates on one job
 
 
+def test_eval_case_can_be_disabled_via_api(client, session):
+    case = client.post("/eval-cases", json={"name": "off-switch", "payload": {}}).json()
+
+    updated = client.patch(f"/eval-cases/{case['id']}", json={"enabled": False}).json()
+    assert updated["enabled"] is False
+    assert run_cases() == 0
+
+    from ticloud.models import Job
+
+    assert session.scalars(select(Job).where(Job.name == "eval:off-switch")).first() is None
+
+    updated = client.patch(f"/eval-cases/{case['id']}", json={"enabled": True}).json()
+    assert updated["enabled"] is True
+    assert run_cases() == 0
+    assert session.scalars(select(Job).where(Job.name == "eval:off-switch")).first() is not None
+
+
 def test_lessons_api(client):
     from test_api import create_job
 

@@ -42,6 +42,7 @@ function relTime(iso) {
 
 const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
 const fmtMoney = (v) => `$${(v ?? 0).toFixed(4)}`;
+const formValue = (v) => esc(v ?? "");
 
 function duration(start, end) {
   if (!start) return "—";
@@ -109,6 +110,32 @@ const fmtScore = (v) => (v == null ? "—" : v.toFixed(2));
 
 /* ---------- views ---------- */
 
+function jobSettingsForm(job) {
+  return `
+    <details class="panel">
+      <summary>Settings</summary>
+      <div class="card">
+        <form class="jobsettings" id="jobsettings">
+          <label>name <input name="name" required value="${formValue(job.name)}"></label>
+          <label>cron (optional) <input name="cron" placeholder="0 2 * * *" value="${formValue(job.cron)}"></label>
+          <label>interval seconds (optional) <input name="interval_seconds" type="number" min="10" value="${formValue(job.interval_seconds)}"></label>
+          <label>budget USD <input name="budget_usd" type="number" step="0.01" min="0.01" value="${formValue(job.budget_usd)}"></label>
+          <label>timeout s <input name="timeout_s" type="number" min="1" value="${formValue(job.timeout_s)}"></label>
+          <label>max retries <input name="max_retries" type="number" min="0" value="${formValue(job.max_retries)}"></label>
+          <label>retry backoff s <input name="retry_backoff_s" type="number" min="0" value="${formValue(job.retry_backoff_s)}"></label>
+          <label>quality gate (0–1, optional) <input name="score_threshold" type="number" step="0.05" min="0" max="1" value="${formValue(job.score_threshold)}"></label>
+          <label>on low score <select name="on_low_score">
+            <option value="alert" ${job.on_low_score === "alert" ? "selected" : ""}>alert</option>
+            <option value="pause" ${job.on_low_score === "pause" ? "selected" : ""}>pause</option>
+          </select></label>
+          <label>webhook URL (optional) <input name="webhook_url" type="url" value="${formValue(job.webhook_url)}"></label>
+          <label class="checkrow"><input name="approval_required" type="checkbox" ${job.approval_required ? "checked" : ""}> approval required</label>
+          <button class="primary submit" type="submit">Save settings</button>
+        </form>
+      </div>
+    </details>`;
+}
+
 async function jobsView() {
   const jobs = await api("/overview");
   const rows = jobs.map((j) => `
@@ -147,6 +174,7 @@ async function jobsView() {
           <label>timeout s <input name="timeout_s" type="number" value="1800"></label>
           <label>quality gate (0–1, optional) <input name="score_threshold" type="number" step="0.05" min="0" max="1" placeholder="0.7"></label>
           <label>on low score <select name="on_low_score"><option>alert</option><option>pause</option></select></label>
+          <label class="checkrow"><input name="approval_required" type="checkbox"> approval required</label>
           <button class="primary submit" type="submit">Create job</button>
         </form>
       </div>
@@ -162,6 +190,7 @@ async function jobsView() {
     body.timeout_s = Number(f.get("timeout_s"));
     if (f.get("score_threshold")) body.score_threshold = Number(f.get("score_threshold"));
     body.on_low_score = f.get("on_low_score");
+    body.approval_required = f.get("approval_required") === "on";
     try { await api("/jobs", { method: "POST", body: JSON.stringify(body) }); toast("job created"); render(); }
     catch (e) { toast(e.message); }
   });
@@ -191,8 +220,10 @@ async function jobDetailView(id) {
       <div class="tile"><div class="k">budget / run</div><div class="v">$${job.budget_usd}</div></div>
       <div class="tile"><div class="k">timeout</div><div class="v">${job.timeout_s}<small> s</small></div></div>
       <div class="tile"><div class="k">max retries</div><div class="v">${job.max_retries}</div></div>
+      <div class="tile"><div class="k">approval</div><div class="v">${job.approval_required ? "required" : "off"}</div></div>
       <div class="tile"><div class="k">runs recorded</div><div class="v">${runs.length}</div></div>
     </div>
+    ${jobSettingsForm(job)}
     <h2>Quality score per run (last ${stats.length})</h2>
     <div class="card">${sparkline(stats, {
       value: (p) => p.score, format: fmtScore, label: "quality score per run",
@@ -217,6 +248,37 @@ async function jobDetailView(id) {
       <button class="primary" data-act="trigger" data-id="${job.id}">Run now</button>
       <button data-act="${job.paused ? "resume" : "pause"}" data-id="${job.id}">${job.paused ? "Resume" : "Pause"}</button>
     </div>`;
+
+  document.getElementById("jobsettings").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const optionalText = (name) => {
+      const value = String(f.get(name) || "").trim();
+      return value ? value : null;
+    };
+    const optionalNumber = (name) => {
+      const value = String(f.get(name) || "").trim();
+      return value ? Number(value) : null;
+    };
+    const body = {
+      name: String(f.get("name") || "").trim(),
+      cron: optionalText("cron"),
+      interval_seconds: optionalNumber("interval_seconds"),
+      budget_usd: Number(f.get("budget_usd")),
+      timeout_s: Number(f.get("timeout_s")),
+      max_retries: Number(f.get("max_retries")),
+      retry_backoff_s: Number(f.get("retry_backoff_s")),
+      score_threshold: optionalNumber("score_threshold"),
+      on_low_score: f.get("on_low_score"),
+      webhook_url: optionalText("webhook_url"),
+      approval_required: f.get("approval_required") === "on",
+    };
+    try {
+      await api(`/jobs/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+      toast("job updated");
+      render();
+    } catch (e) { toast(e.message); }
+  });
 }
 
 function stepRow(s) {
@@ -266,7 +328,11 @@ async function runDetailView(id) {
       </div>`).join("")}</div>` : ""}
     ${run.error ? `<h2>Error</h2><div class="error-box">${esc(run.error)}</div>` : ""}
     <h2>Trace</h2>
-    <div class="card" id="trace">${steps || '<div class="empty">no steps recorded yet</div>'}</div>`;
+    <div class="card" id="trace">${steps || '<div class="empty">no steps recorded yet</div>'}</div>
+    ${run.status === "awaiting_approval" ? `<div class="actions">
+      <button class="primary" data-runact="approve" data-id="${run.id}">Approve</button>
+      <button data-runact="reject" data-id="${run.id}">Reject</button>
+    </div>` : ""}`;
 
   // Live trace: stream new steps over SSE while the run is in flight, so the
   // workshop grows before your eyes. Falls back to polling if SSE fails
@@ -289,6 +355,31 @@ async function runDetailView(id) {
   } else if (inFlight) {
     schedulePoll(2000);
   }
+}
+
+async function approvalsView() {
+  const runs = await api("/approvals");
+  const rows = runs.map((r) => `
+    <tr>
+      <td>${badge(r.status)}</td>
+      <td><a href="#/runs/${r.id}">${esc(r.id.slice(0, 8))}</a><br><small style="color:var(--muted)">job ${esc(r.job_id.slice(0, 8))}</small></td>
+      <td>${esc(fmtTime(r.scheduled_at))}<br><small style="color:var(--muted)">${relTime(r.scheduled_at)}</small></td>
+      <td class="num">${r.attempt}</td>
+      <td class="actions">
+        <button class="primary" data-runact="approve" data-id="${r.id}">Approve</button>
+        <button data-runact="reject" data-id="${r.id}">Reject</button>
+      </td>
+    </tr>`).join("");
+
+  app.innerHTML = `
+    <h1>Approvals</h1>
+    <div class="sub">runs waiting for a human before the engine starts</div>
+    <div class="card">
+      ${runs.length ? `<table>
+        <thead><tr><th>Status</th><th>Run</th><th>Requested</th><th class="num">Attempt</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table>`
+      : `<div class="empty">No runs are waiting for approval.</div>`}
+    </div>`;
 }
 
 async function alertsView() {
@@ -345,7 +436,10 @@ async function failuresView() {
       <td>${esc(c.engine)}</td>
       <td class="num">${fmtScore(c.min_score)}</td>
       <td>${c.source_signature ? `<code style="font-size:12px">${esc(c.source_signature)}</code>` : '<span style="color:var(--muted)">manual</span>'}</td>
-      <td class="actions"><button data-delcase="${c.id}">Delete</button></td>
+      <td class="actions">
+        <button data-togglecase="${c.id}" data-enabled="${c.enabled ? "false" : "true"}">${c.enabled ? "Disable" : "Enable"}</button>
+        <button data-delcase="${c.id}">Delete</button>
+      </td>
     </tr>`).join("");
 
   app.innerHTML = `
@@ -419,7 +513,11 @@ async function usageView() {
 
 function schedulePoll(ms) {
   clearTimeout(pollTimer);
-  pollTimer = setTimeout(() => { if (!document.hidden) render(); else schedulePoll(ms); }, ms);
+  pollTimer = setTimeout(() => {
+    if (document.activeElement && document.activeElement.closest("form")) schedulePoll(ms);
+    else if (!document.hidden) render();
+    else schedulePoll(ms);
+  }, ms);
 }
 
 async function render() {
@@ -430,6 +528,7 @@ async function render() {
   try {
     if (view === "runs" && id) await runDetailView(id);
     else if (view === "usage") { await usageView(); schedulePoll(15000); }
+    else if (view === "approvals") { await approvalsView(); schedulePoll(5000); }
     else if (view === "failures") { await failuresView(); schedulePoll(6000); }
     else if (view === "alerts") { await alertsView(); schedulePoll(5000); }
     else if (view === "jobs" && id) { await jobDetailView(id); schedulePoll(3000); }
@@ -462,12 +561,27 @@ app.addEventListener("click", (ev) => {
     act("DELETE", `/eval-cases/${delBtn.dataset.delcase}`, render);
     return;
   }
+  const toggleBtn = ev.target.closest("button[data-togglecase]");
+  if (toggleBtn) {
+    ev.stopPropagation();
+    api(`/eval-cases/${toggleBtn.dataset.togglecase}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled: toggleBtn.dataset.enabled === "true" }),
+    }).then(() => { toast("eval case updated"); render(); }).catch((e) => toast(e.message));
+    return;
+  }
   const btn = ev.target.closest("button[data-act]");
   if (btn) {
     ev.stopPropagation();
     const { act: action, id } = btn.dataset;
     const method = "POST";
     act(method, `/jobs/${id}/${action}`, render);
+    return;
+  }
+  const runBtn = ev.target.closest("button[data-runact]");
+  if (runBtn) {
+    ev.stopPropagation();
+    act("POST", `/runs/${runBtn.dataset.id}/${runBtn.dataset.runact}`, render);
     return;
   }
   const row = ev.target.closest("tr.rowlink");

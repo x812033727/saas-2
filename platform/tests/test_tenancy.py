@@ -187,6 +187,34 @@ def test_hosted_eval_case_requires_owned_job(client, hosted):
     assert r.status_code == 404
 
 
+def test_hosted_eval_case_patch_is_tenant_scoped(client, hosted):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+    job = client.post("/jobs", json={"name": "owned-case-job"}, headers=auth_a).json()
+    case = client.post(
+        "/eval-cases",
+        json={"name": "owned-case", "job_id": job["id"]},
+        headers=auth_a,
+    ).json()
+
+    forbidden = client.patch(
+        f"/eval-cases/{case['id']}", json={"enabled": False}, headers=auth_b
+    )
+    assert forbidden.status_code == 404
+    invalid = client.patch(
+        f"/eval-cases/{case['id']}",
+        json={"enabled": "not-a-bool"},
+        headers=auth_a,
+    )
+    assert invalid.status_code == 422
+    updated = client.patch(
+        f"/eval-cases/{case['id']}",
+        json={"enabled": False},
+        headers=auth_a,
+    ).json()
+    assert updated["enabled"] is False
+
+
 def test_usage_metering_per_tenant(client, hosted, session):
     tenant_a, _, auth_a = _mint_tenant(client, "team-a")
     _, _, auth_b = _mint_tenant(client, "team-b")
@@ -237,6 +265,29 @@ def test_init_db_backfills_tenant_id_column():
     init_db()  # also proves idempotency on a fully-migrated schema
     assert "tenant_id" in {c["name"] for c in inspect(engine).get_columns("jobs")}
     init_db()
+
+
+def test_init_db_backfills_eval_case_enabled_column():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE eval_cases_legacy AS SELECT id, name, job_id, engine, "
+                "payload, min_score, source_signature, created_at FROM eval_cases"
+            )
+        )
+        conn.execute(text("DROP TABLE eval_cases"))
+        conn.execute(text("ALTER TABLE eval_cases_legacy RENAME TO eval_cases"))
+        conn.execute(
+            text(
+                "INSERT INTO eval_cases (id, name, engine, payload, min_score) "
+                "VALUES ('c1', 'old', 'offline', '{}', 0.9)"
+            )
+        )
+    assert "enabled" not in {c["name"] for c in inspect(engine).get_columns("eval_cases")}
+    init_db()
+    assert "enabled" in {c["name"] for c in inspect(engine).get_columns("eval_cases")}
+    with engine.begin() as conn:
+        assert conn.execute(text("SELECT enabled FROM eval_cases WHERE id = 'c1'")).scalar()
 
 
 def test_worker_runs_tenant_jobs(client, hosted, session, monkeypatch):
