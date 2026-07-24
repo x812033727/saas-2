@@ -175,6 +175,21 @@ def test_usage_reports_budget_and_over_flag(client, hosted, session):
     assert usage["over_budget"] is True
 
 
+def test_admin_usage_reports_budget_and_over_flag(client, hosted, session):
+    tenant, auth = _mint_tenant(client, "acme")
+    client.put(
+        f"/admin/tenants/{tenant['id']}/budget", json={"monthly_budget_usd": 5.0}, headers=ADMIN
+    )
+    job = client.post("/jobs", json={"name": "j"}, headers=auth).json()
+    _spend(session, job["id"], 6.0)
+
+    all_usage = client.get("/admin/usage", headers=ADMIN).json()
+    row = next(u for u in all_usage if u["tenant_id"] == tenant["id"])
+    assert row["monthly_budget_usd"] == 5.0
+    assert row["current_month_cost_usd"] == 6.0
+    assert row["over_budget"] is True
+
+
 # --- billing unit ------------------------------------------------------------
 
 

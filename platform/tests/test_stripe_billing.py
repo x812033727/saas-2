@@ -6,6 +6,7 @@ events unverified, so tests post plain event JSON. Signature verification
 """
 
 import json
+import sys
 
 import pytest
 
@@ -192,6 +193,40 @@ def test_bad_signature_rejected(client, monkeypatch):
     resp = _post(client, _event("checkout.session.completed", {}))
     assert resp.status_code == 400
     assert "signature" in resp.json()["detail"]
+
+
+def test_configured_secret_without_installed_stripe_sdk_returns_503(client, monkeypatch):
+    monkeypatch.setattr(settings, "stripe_webhook_secret", "whsec_test")
+    monkeypatch.setitem(sys.modules, "stripe", None)
+
+    resp = _post(client, _event("checkout.session.completed", {}))
+
+    assert resp.status_code == 503
+    assert "TICLOUD_STRIPE_WEBHOOK_SECRET" in resp.json()["detail"]
+    assert "Stripe SDK" in resp.json()["detail"]
+
+
+def test_missing_stripe_sdk_with_secret_is_clear_503(client, monkeypatch):
+    monkeypatch.setattr(settings, "stripe_webhook_secret", "whsec_test")
+
+    def boom(payload, sig):
+        raise stripe_billing.StripeSdkMissing("Stripe SDK is not installed")
+
+    monkeypatch.setattr(stripe_billing, "parse_event", boom)
+    resp = _post(client, _event("checkout.session.completed", {}))
+    assert resp.status_code == 503
+    assert "Stripe SDK" in resp.json()["detail"]
+
+
+def test_unexpected_webhook_runtime_error_is_not_masked(client, monkeypatch):
+    monkeypatch.setattr(settings, "stripe_webhook_secret", "whsec_test")
+
+    def boom(payload, sig):
+        raise RuntimeError("database adapter exploded")
+
+    monkeypatch.setattr(stripe_billing, "parse_event", boom)
+    with pytest.raises(RuntimeError, match="database adapter exploded"):
+        _post(client, _event("checkout.session.completed", {}))
 
 
 # --- admin manual plan (comp accounts / no Stripe) ---------------------------

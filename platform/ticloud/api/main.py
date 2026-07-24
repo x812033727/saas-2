@@ -120,6 +120,8 @@ async def stripe_webhook(request: Request, session: Session = Depends(db)) -> di
         event = stripe_billing.parse_event(payload, request.headers.get("stripe-signature"))
     except stripe_billing.SignatureError:
         raise HTTPException(400, "invalid stripe signature")
+    except stripe_billing.StripeSdkMissing as e:
+        raise HTTPException(503, str(e))
     except ValueError:
         raise HTTPException(400, "malformed webhook payload")
     result = stripe_billing.handle_event(session, event)
@@ -888,10 +890,26 @@ def admin_usage(session: Session = Depends(db)) -> list[UsageOut]:
     out = []
     for tenant in session.scalars(select(Tenant).order_by(Tenant.created_at)):
         job_ids = _tenant_job_ids(session, tenant)
-        out.append(UsageOut(tenant_id=tenant.id, months=_usage_months(session, job_ids)))
+        current_cost = month_to_date_cost(session, job_ids)
+        budget = tenant.monthly_budget_usd
+        out.append(
+            UsageOut(
+                tenant_id=tenant.id,
+                months=_usage_months(session, job_ids),
+                monthly_budget_usd=budget,
+                current_month_cost_usd=current_cost,
+                over_budget=budget is not None and current_cost >= budget,
+            )
+        )
     unowned = list(session.scalars(select(Job.id).where(Job.tenant_id.is_(None))))
     if unowned:
-        out.append(UsageOut(tenant_id=None, months=_usage_months(session, unowned)))
+        out.append(
+            UsageOut(
+                tenant_id=None,
+                months=_usage_months(session, unowned),
+                current_month_cost_usd=month_to_date_cost(session, unowned),
+            )
+        )
     return out
 
 
