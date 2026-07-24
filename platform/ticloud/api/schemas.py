@@ -251,6 +251,10 @@ class EvalCaseOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class EvalCaseUpdate(BaseModel):
+    enabled: bool | None = None
+
+
 class AlertOut(BaseModel):
     id: str
     job_id: str

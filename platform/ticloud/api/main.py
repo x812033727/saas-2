@@ -42,6 +42,7 @@ from .schemas import (
     ApiKeyOut,
     EvalCaseCreate,
     EvalCaseOut,
+    EvalCaseUpdate,
     FailureModeOut,
     JobCreate,
     JobOut,
@@ -555,12 +556,7 @@ def create_eval_case(
     return case
 
 
-@app.delete("/eval-cases/{case_id}", status_code=204)
-def delete_eval_case(
-    case_id: str,
-    session: Session = Depends(db),
-    tenant: Tenant | None = Depends(current_tenant),
-) -> None:
+def _get_eval_case(session: Session, case_id: str, tenant: Tenant | None) -> EvalCase:
     case = session.get(EvalCase, case_id)
     if case is None:
         raise HTTPException(404, "eval case not found")
@@ -568,6 +564,30 @@ def delete_eval_case(
         if case.job_id is None:
             raise HTTPException(404, "eval case not found")
         _get_job(session, case.job_id, tenant)
+    return case
+
+
+@app.patch("/eval-cases/{case_id}", response_model=EvalCaseOut)
+def update_eval_case(
+    case_id: str,
+    body: EvalCaseUpdate,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> EvalCase:
+    case = _get_eval_case(session, case_id, tenant)
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(case, field, value)
+    session.commit()
+    return case
+
+
+@app.delete("/eval-cases/{case_id}", status_code=204)
+def delete_eval_case(
+    case_id: str,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> None:
+    case = _get_eval_case(session, case_id, tenant)
     session.delete(case)
     session.commit()
 

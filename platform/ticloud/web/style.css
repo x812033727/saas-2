@@ -115,7 +115,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .badge.succeeded .dot { background: var(--good); }
 .badge.failed .dot { background: var(--critical); }
 .badge.timed_out .dot, .badge.budget_exceeded .dot { background: var(--serious); }
-.badge.queued .dot { background: var(--warning); }
+.badge.queued .dot, .badge.awaiting_approval .dot { background: var(--warning); }
 .badge.running .dot { background: var(--series-1); animation: pulse 1.2s ease-in-out infinite; }
 .badge.cancelled .dot, .badge.paused .dot { background: var(--muted); }
 @keyframes pulse { 50% { opacity: 0.35; } }
@@ -139,10 +139,18 @@ button.primary {
 button.primary:hover { opacity: 0.9; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
-/* New-job form */
-form.newjob { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-form.newjob label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
-form.newjob input, form.newjob select {
+/* Compact edit forms */
+form.newjob, form.jobsettings { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+form.newjob label, form.jobsettings label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+form.newjob label.checkrow, form.jobsettings label.checkrow {
+  flex-direction: row;
+  align-items: center;
+  align-self: end;
+  min-height: 32px;
+  color: var(--ink-2);
+}
+form.newjob label.checkrow input, form.jobsettings label.checkrow input { width: auto; }
+form.newjob input, form.newjob select, form.jobsettings input, form.jobsettings select {
   font: inherit;
   font-size: 14px;
   padding: 5px 8px;
@@ -151,7 +159,12 @@ form.newjob input, form.newjob select {
   background: var(--surface);
   color: var(--ink);
 }
-form.newjob .submit { align-self: end; }
+form.newjob label.checkrow input, form.jobsettings label.checkrow input {
+  width: auto;
+  padding: 0;
+  border-radius: 3px;
+}
+form.newjob .submit, form.jobsettings .submit { align-self: end; }
 details.panel summary { cursor: pointer; color: var(--series-1); font-size: 14px; margin-bottom: 8px; }
 
 /* Stat tiles */

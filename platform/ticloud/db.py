@@ -48,6 +48,9 @@ def _ensure_new_columns() -> None:
             ("webhook_url", "VARCHAR(500)"),
             ("max_concurrent_runs", "INTEGER"),
         ],
+        "eval_cases": [
+            ("enabled", "BOOLEAN DEFAULT TRUE"),
+        ],
     }
     # (index name, table, column list) — names match what create_all emits on
     # a fresh DB, so CREATE INDEX IF NOT EXISTS is a no-op there.

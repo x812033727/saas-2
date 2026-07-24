@@ -239,6 +239,29 @@ def test_init_db_backfills_tenant_id_column():
     init_db()
 
 
+def test_init_db_backfills_eval_case_enabled_column():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE eval_cases_legacy AS SELECT id, name, job_id, engine, "
+                "payload, min_score, source_signature, created_at FROM eval_cases"
+            )
+        )
+        conn.execute(text("DROP TABLE eval_cases"))
+        conn.execute(text("ALTER TABLE eval_cases_legacy RENAME TO eval_cases"))
+        conn.execute(
+            text(
+                "INSERT INTO eval_cases (id, name, engine, payload, min_score) "
+                "VALUES ('c1', 'old', 'offline', '{}', 0.9)"
+            )
+        )
+    assert "enabled" not in {c["name"] for c in inspect(engine).get_columns("eval_cases")}
+    init_db()
+    assert "enabled" in {c["name"] for c in inspect(engine).get_columns("eval_cases")}
+    with engine.begin() as conn:
+        assert conn.execute(text("SELECT enabled FROM eval_cases WHERE id = 'c1'")).scalar()
+
+
 def test_worker_runs_tenant_jobs(client, hosted, session, monkeypatch):
     """The worker is tenant-agnostic: owned jobs execute like any other."""
     monkeypatch.setattr(settings, "auth_mode", "required")
