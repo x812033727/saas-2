@@ -4,10 +4,26 @@ An approval_required job never runs the engine until a human approves the
 run; reject terminates it without running.
 """
 
+import pytest
+
 from test_api import create_job
+from test_tenancy import ADMIN, _mint_tenant
+from ticloud.config import settings
 from ticloud.models import TERMINAL_STATUSES, Run, RunStatus
 from ticloud.scheduler.queue import claim_next_run
 from ticloud.scheduler.worker import execute_run
+
+
+@pytest.fixture
+def admin_mode(monkeypatch):
+    monkeypatch.setattr(
+        settings, "admin_token", ADMIN["Authorization"].removeprefix("Bearer ")
+    )
+
+
+@pytest.fixture
+def hosted(monkeypatch, admin_mode):
+    monkeypatch.setattr(settings, "auth_mode", "required")
 
 
 def _trigger_and_execute(session, client, job_id):
@@ -49,6 +65,15 @@ def test_reject_terminates_without_running(session, client):
     assert claim_next_run(session) is None  # never runs
 
 
+def test_rejected_approval_cannot_be_approved_later(session, client):
+    job = create_job(client, cron=None, approval_required=True)
+    run = _trigger_and_execute(session, client, job["id"])
+
+    assert client.post(f"/runs/{run['id']}/reject").status_code == 200
+    assert client.post(f"/runs/{run['id']}/approve").status_code == 409
+    assert claim_next_run(session) is None
+
+
 def test_approve_reject_require_awaiting_state(session, client):
     job = create_job(client, cron=None)  # no gate
     run = client.post(f"/jobs/{job['id']}/trigger").json()
@@ -74,3 +99,21 @@ def test_approval_required_settable_on_create_and_patch(client):
 
 def test_awaiting_approval_is_not_terminal():
     assert RunStatus.AWAITING_APPROVAL not in TERMINAL_STATUSES
+
+
+def test_approvals_queue_is_tenant_scoped(client, hosted, session):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+    job = client.post(
+        "/jobs",
+        json={"name": "needs-review", "cron": None, "approval_required": True},
+        headers=auth_a,
+    ).json()
+    run = client.post(f"/jobs/{job['id']}/trigger", headers=auth_a).json()
+    execute_run(claim_next_run(session).id)
+
+    visible_to_a = [r["id"] for r in client.get("/approvals", headers=auth_a).json()]
+    assert visible_to_a == [run["id"]]
+    assert client.get("/approvals", headers=auth_b).json() == []
+    assert client.post(f"/runs/{run['id']}/approve", headers=auth_b).status_code == 404
+    assert client.post(f"/runs/{run['id']}/reject", headers=auth_b).status_code == 404

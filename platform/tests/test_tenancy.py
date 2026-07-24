@@ -187,6 +187,34 @@ def test_hosted_eval_case_requires_owned_job(client, hosted):
     assert r.status_code == 404
 
 
+def test_hosted_eval_case_patch_is_tenant_scoped(client, hosted):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+    job = client.post("/jobs", json={"name": "owned-case-job"}, headers=auth_a).json()
+    case = client.post(
+        "/eval-cases",
+        json={"name": "owned-case", "job_id": job["id"]},
+        headers=auth_a,
+    ).json()
+
+    forbidden = client.patch(
+        f"/eval-cases/{case['id']}", json={"enabled": False}, headers=auth_b
+    )
+    assert forbidden.status_code == 404
+    invalid = client.patch(
+        f"/eval-cases/{case['id']}",
+        json={"enabled": "not-a-bool"},
+        headers=auth_a,
+    )
+    assert invalid.status_code == 422
+    updated = client.patch(
+        f"/eval-cases/{case['id']}",
+        json={"enabled": False},
+        headers=auth_a,
+    ).json()
+    assert updated["enabled"] is False
+
+
 def test_usage_metering_per_tenant(client, hosted, session):
     tenant_a, _, auth_a = _mint_tenant(client, "team-a")
     _, _, auth_b = _mint_tenant(client, "team-b")
