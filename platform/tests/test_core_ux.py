@@ -62,6 +62,23 @@ def test_cancel_queued_run(session, client):
     assert claim_next_run(session) is None
 
 
+def test_cancel_awaiting_approval_run_finishes_immediately(session, client):
+    job = create_job(client, cron=None, approval_required=True)
+    run = client.post(f"/jobs/{job['id']}/trigger").json()
+    execute_run(run["id"])  # held at the approval gate
+
+    r = client.post(f"/runs/{run['id']}/cancel")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "cancelled"
+
+    session.expire_all()
+    stored = session.get(Run, run["id"])
+    assert stored.finished_at is not None
+    assert stored.approval_state == "cancelled"
+    assert stored.error == "cancelled by user"
+
+
 def test_cancel_terminal_run_409(session, client):
     job = create_job(client, cron=None)
     run = client.post(f"/jobs/{job['id']}/trigger").json()

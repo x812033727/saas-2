@@ -674,14 +674,18 @@ def cancel_run(
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> Run:
-    """Cancel a queued or running run. A queued run is cancelled immediately;
-    a running one is flagged and the worker stops it cooperatively (the
-    schedule pause only affects future runs, not an in-flight one)."""
+    """Cancel a queued, approval-held, or running run. Queued/held runs are
+    cancelled immediately; a running one is flagged and the worker stops it
+    cooperatively (the schedule pause only affects future runs, not an
+    in-flight one)."""
     run = _get_run(session, run_id, tenant)
     if run.status in TERMINAL_STATUSES:
         raise HTTPException(409, f"run already {run.status.value}")
-    if run.status == RunStatus.QUEUED:
+    if run.status in {RunStatus.QUEUED, RunStatus.AWAITING_APPROVAL}:
+        if run.status == RunStatus.AWAITING_APPROVAL:
+            run.approval_state = "cancelled"
         run.status = RunStatus.CANCELLED
+        run.error = "cancelled by user"
         run.finished_at = datetime.now(timezone.utc)
     else:  # RUNNING — the worker polls this flag and winds the engine down
         run.cancel_requested = True
