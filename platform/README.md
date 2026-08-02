@@ -9,7 +9,7 @@ https://github.com/x812033727/saas-2
 
 ```bash
 pip install -e "platform[dev]"
-uvicorn ticloud.api.main:app &          # API + dashboard on :8000/ui/
+python -m ticloud.api.main &            # API + dashboard on :8000/ui/
 python -m ticloud.scheduler.worker &    # scheduler + executor
 python -m ticloud.demo                  # zero-API-key showcase seed
 ```

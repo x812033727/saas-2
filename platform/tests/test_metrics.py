@@ -2,10 +2,19 @@
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 
 from test_scheduler import make_job
 from ticloud.metrics import JsonFormatter, render_metrics
 from ticloud.models import Alert, Run, RunStatus
+
+
+def _metric_value(body: str, name: str) -> float:
+    prefix = f"{name} "
+    for line in body.splitlines():
+        if line.startswith(prefix):
+            return float(line.removeprefix(prefix))
+    raise AssertionError(f"metric {name} not found")
 
 
 def test_metrics_endpoint_exposition(session, client):
@@ -27,9 +36,36 @@ def test_metrics_endpoint_exposition(session, client):
     assert "# TYPE ticloud_runs_total gauge" in body
 
 
+def test_metrics_exposes_stuck_queue_and_running_ages(session, client):
+    job = make_job(session)
+    now = datetime.now(timezone.utc)
+    session.add(
+        Run(
+            job_id=job.id,
+            status=RunStatus.QUEUED,
+            scheduled_at=now - timedelta(seconds=90),
+        )
+    )
+    session.add(
+        Run(
+            job_id=job.id,
+            status=RunStatus.RUNNING,
+            scheduled_at=now - timedelta(seconds=30),
+            started_at=now - timedelta(seconds=45),
+        )
+    )
+    session.commit()
+
+    body = client.get("/metrics").text
+    assert _metric_value(body, "ticloud_oldest_queued_run_age_seconds") >= 90
+    assert _metric_value(body, "ticloud_oldest_running_run_age_seconds") >= 45
+
+
 def test_metrics_empty_db(client):
     body = client.get("/metrics").text
     assert 'ticloud_runs_total{status="running"} 0' in body
+    assert "ticloud_oldest_queued_run_age_seconds 0.0" in body
+    assert "ticloud_oldest_running_run_age_seconds 0.0" in body
     assert "ticloud_cost_usd_total 0" in body
 
 

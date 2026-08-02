@@ -1,6 +1,8 @@
+import argparse
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,7 +35,7 @@ from ..models import (
     Tenant,
 )
 from ..scheduler.cron import compute_next_run
-from ..scheduler.queue import enqueue_manual
+from ..scheduler.queue import enqueue_manual, enqueue_rerun
 from .auth import generate_key, hash_key, make_current_tenant, require_admin
 from .schemas import (
     AlertOut,
@@ -689,6 +691,23 @@ def cancel_run(
     return run
 
 
+@app.post("/runs/{run_id}/rerun", response_model=RunOut, status_code=201)
+def rerun_run(
+    run_id: str,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> Run:
+    """Queue a fresh execution from a terminal run without mutating history."""
+    run = _get_run(session, run_id, tenant)
+    if run.status not in TERMINAL_STATUSES:
+        raise HTTPException(409, f"run is still {run.status.value}")
+    if tenant is not None and tenant_over_budget(session, tenant):
+        raise HTTPException(
+            402, f"tenant monthly budget (${tenant.monthly_budget_usd:.2f}) reached"
+        )
+    return enqueue_rerun(session, run)
+
+
 @app.get("/approvals", response_model=list[RunOut])
 def list_approvals(
     session: Session = Depends(db), tenant: Tenant | None = Depends(current_tenant)
@@ -940,3 +959,19 @@ app.include_router(admin)
 _web_dir = Path(__file__).resolve().parent.parent / "web"
 if _web_dir.is_dir():  # pragma: no branch
     app.mount("/ui", StaticFiles(directory=_web_dir, html=True), name="ui")
+
+
+def _main() -> None:
+    parser = argparse.ArgumentParser(description="Run the Ti Cloud API and dashboard.")
+    parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
+    parser.add_argument("--reload", action="store_true")
+    args = parser.parse_args()
+
+    import uvicorn
+
+    uvicorn.run("ticloud.api.main:app", host=args.host, port=args.port, reload=args.reload)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    _main()

@@ -16,9 +16,16 @@ from sqlalchemy.orm import Session
 from .models import Alert, Job, Run, RunStatus
 
 
+def _age_seconds(now: datetime, then: datetime | None) -> float:
+    if then is None:
+        return 0.0
+    return round(max(0.0, (now - then).total_seconds()), 3)
+
+
 def render_metrics(session: Session) -> str:
     """Prometheus text exposition of queue, run, job, and spend state."""
     lines: list[str] = []
+    now = datetime.now(timezone.utc)
 
     def metric(name: str, help_text: str, mtype: str, samples: list[tuple[str, float]]):
         lines.append(f"# HELP {name} {help_text}")
@@ -36,6 +43,38 @@ def render_metrics(session: Session) -> str:
         "Runs by status.",
         "gauge",
         [(f'status="{s.value}"', by_status.get(s, 0)) for s in RunStatus],
+    )
+
+    oldest_queued = session.scalar(
+        select(Run).where(Run.status == RunStatus.QUEUED).order_by(Run.scheduled_at).limit(1)
+    )
+    oldest_running = session.scalar(
+        select(Run)
+        .where(Run.status == RunStatus.RUNNING)
+        .order_by(func.coalesce(Run.started_at, Run.scheduled_at))
+        .limit(1)
+    )
+    metric(
+        "ticloud_oldest_queued_run_age_seconds",
+        "Age in seconds of the oldest queued run; 0 when the queue is empty.",
+        "gauge",
+        [("", _age_seconds(now, oldest_queued.scheduled_at if oldest_queued else None))],
+    )
+    metric(
+        "ticloud_oldest_running_run_age_seconds",
+        "Age in seconds of the oldest running run; 0 when no run is running.",
+        "gauge",
+        [
+            (
+                "",
+                _age_seconds(
+                    now,
+                    (oldest_running.started_at or oldest_running.scheduled_at)
+                    if oldest_running
+                    else None,
+                ),
+            )
+        ],
     )
 
     # Jobs by paused state.
