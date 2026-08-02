@@ -84,7 +84,7 @@ docker compose -f deploy/docker-compose.yml up
 
 # Or local dev (SQLite, zero config):
 pip install -e "platform[dev]"
-uvicorn ticloud.api.main:app --reload &        # API + dashboard on :8000/ui/
+python -m ticloud.api.main --reload &          # API + dashboard on :8000/ui/
 python -m ticloud.scheduler.worker &           # scheduler + executor
 python -m ticloud.demo                         # seed the showcase jobs
 ```
@@ -112,6 +112,10 @@ curl -X POST localhost:8000/jobs -H 'content-type: application/json' -d '{
   "on_low_score": "pause"
 }'
 ```
+
+After fixing a failed job's config/payload, queue a fresh attempt without
+losing the original trace from the run detail page's **Rerun** button, or
+with `POST /runs/{run_id}/rerun`.
 
 ## Job templates
 
@@ -243,8 +247,9 @@ docs/PLAN.md   product plan & roadmap (zh-TW); docs/LAUNCH.md launch notes
 
 ## Operating it
 
-`GET /metrics` is Prometheus exposition (queue depth, runs by status, jobs,
-unacknowledged alerts, cumulative spend/tokens) — point a scraper at it.
+`GET /metrics` is Prometheus exposition (queue depth, oldest queued/running
+run age, runs by status, jobs, unacknowledged alerts, cumulative
+spend/tokens) — point a scraper at it.
 Set `TICLOUD_LOG_JSON=1` for one-JSON-object-per-line logs (with run/job
 ids) instead of plain text.
 

@@ -57,6 +57,9 @@ const STATUS_LABEL = {
   budget_exceeded: "$ over budget", cancelled: "− cancelled",
   awaiting_approval: "⏸ awaiting approval",
 };
+const TERMINAL_RUN_STATUSES = new Set([
+  "succeeded", "failed", "timed_out", "budget_exceeded", "cancelled",
+]);
 const badge = (status) =>
   `<span class="badge ${esc(status)}"><span class="dot"></span>${esc(STATUS_LABEL[status] || status)}</span>`;
 
@@ -298,6 +301,13 @@ async function runDetailView(id) {
   const run = await api(`/runs/${id}`);
   const lessons = await api(`/jobs/${run.job_id}/lessons`).catch(() => []);
   const steps = run.steps.map(stepRow).join("");
+  const canRerun = TERMINAL_RUN_STATUSES.has(run.status);
+  const approvalActions = run.status === "awaiting_approval" ? `
+    <button class="primary" data-runact="approve" data-id="${run.id}">Approve</button>
+    <button data-runact="reject" data-id="${run.id}">Reject</button>` : "";
+  const rerunAction = canRerun
+    ? `<button class="primary" data-runact="rerun" data-id="${run.id}">Rerun</button>`
+    : "";
 
   app.innerHTML = `
     <div class="crumb"><a href="#/jobs">Jobs</a> / <a href="#/jobs/${run.job_id}">job</a> / run ${esc(run.id.slice(0, 8))}</div>
@@ -329,10 +339,7 @@ async function runDetailView(id) {
     ${run.error ? `<h2>Error</h2><div class="error-box">${esc(run.error)}</div>` : ""}
     <h2>Trace</h2>
     <div class="card" id="trace">${steps || '<div class="empty">no steps recorded yet</div>'}</div>
-    ${run.status === "awaiting_approval" ? `<div class="actions">
-      <button class="primary" data-runact="approve" data-id="${run.id}">Approve</button>
-      <button data-runact="reject" data-id="${run.id}">Reject</button>
-    </div>` : ""}`;
+    ${approvalActions || rerunAction ? `<div class="actions">${approvalActions}${rerunAction}</div>` : ""}`;
 
   // Live trace: stream new steps over SSE while the run is in flight, so the
   // workshop grows before your eyes. Falls back to polling if SSE fails
@@ -581,6 +588,12 @@ app.addEventListener("click", (ev) => {
   const runBtn = ev.target.closest("button[data-runact]");
   if (runBtn) {
     ev.stopPropagation();
+    if (runBtn.dataset.runact === "rerun") {
+      api(`/runs/${runBtn.dataset.id}/rerun`, { method: "POST" })
+        .then((run) => { toast("run queued"); location.hash = `#/runs/${run.id}`; render(); })
+        .catch((e) => toast(e.message));
+      return;
+    }
     act("POST", `/runs/${runBtn.dataset.id}/${runBtn.dataset.runact}`, render);
     return;
   }

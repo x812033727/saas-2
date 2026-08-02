@@ -99,6 +99,17 @@ def enqueue_manual(session: Session, job: Job) -> Run:
     return run
 
 
+def enqueue_rerun(session: Session, source: Run) -> Run:
+    """Queue a fresh run from a completed run, preserving failure context."""
+    result = {"rerun_of": source.id}
+    if source.error:
+        result["previous_error"] = source.error[:2000]
+    run = Run(job_id=source.job_id, status=RunStatus.QUEUED, result=result)
+    session.add(run)
+    session.commit()
+    return run
+
+
 def claim_next_run(session: Session, now: datetime | None = None) -> Run | None:
     """Atomically claim one due queued run and mark it RUNNING.
 

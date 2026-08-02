@@ -92,6 +92,34 @@ def test_cancel_running_run_stops_it(session):
     assert session.get(Run, run.id).status == RunStatus.CANCELLED
 
 
+def test_rerun_terminal_run_keeps_history_and_failure_context(client):
+    job = create_job(client, cron=None, payload={"fail_at": 0}, max_retries=0)
+    first = client.post(f"/jobs/{job['id']}/trigger").json()
+    execute_run(first["id"])
+    assert client.get(f"/runs/{first['id']}").json()["status"] == "failed"
+
+    # Fix the job payload and queue a fresh run from the failed one.
+    assert client.patch(f"/jobs/{job['id']}", json={"payload": {}}).status_code == 200
+    rerun = client.post(f"/runs/{first['id']}/rerun")
+    assert rerun.status_code == 201, rerun.text
+    body = rerun.json()
+    assert body["status"] == "queued"
+    assert body["attempt"] == 1
+    assert body["result"]["rerun_of"] == first["id"]
+    assert "previous_error" in body["result"]
+
+    execute_run(body["id"])
+    assert client.get(f"/runs/{body['id']}").json()["status"] == "succeeded"
+    runs = client.get(f"/jobs/{job['id']}/runs").json()
+    assert {r["id"] for r in runs} == {first["id"], body["id"]}
+
+
+def test_rerun_non_terminal_run_409(client):
+    job = create_job(client, cron=None)
+    run = client.post(f"/jobs/{job['id']}/trigger").json()
+    assert client.post(f"/runs/{run['id']}/rerun").status_code == 409
+
+
 # --- B8 retry backoff --------------------------------------------------------
 
 
