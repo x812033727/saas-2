@@ -198,7 +198,7 @@ class Run(Base):
     # Set by POST /runs/{id}/cancel; the worker polls this mid-run (across
     # processes) and cooperatively cancels an in-flight run.
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
-    # None = no approval gate; "pending"/"approved"/"rejected" while gated.
+    # None = no approval gate; "pending"/"approved"/"rejected"/"cancelled" while gated.
     approval_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     scheduled_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)

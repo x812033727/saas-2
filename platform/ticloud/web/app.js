@@ -67,6 +67,12 @@ function scheduleText(job) {
   return "manual only";
 }
 
+function templateSchedule(tpl) {
+  if (tpl.cron) return `cron ${tpl.cron}`;
+  if (tpl.interval_seconds) return `every ${tpl.interval_seconds}s`;
+  return "manual only";
+}
+
 function toast(msg) {
   let el = document.querySelector(".toast");
   if (!el) { el = document.createElement("div"); el.className = "toast"; document.body.append(el); }
@@ -196,6 +202,60 @@ async function jobsView() {
   });
 }
 
+async function templatesView() {
+  const templates = await api("/templates");
+  const rows = templates.map((tpl) => {
+    const required = tpl.required_payload || [];
+    const fields = required.map((key) => `
+          <label>${esc(key)} <input name="payload:${esc(key)}" required placeholder="${esc(key)}"></label>`).join("");
+    return `
+    <tr>
+      <td><strong>${esc(tpl.name)}</strong><br><small style="color:var(--muted)">${esc(tpl.description)}</small></td>
+      <td>${esc(tpl.engine)}<br><small style="color:var(--muted)">${esc(templateSchedule(tpl))}</small></td>
+      <td>
+        <form class="templatejob" data-template="${esc(tpl.id)}">
+          <label>name <input name="name" required placeholder="${esc(tpl.id)}"></label>
+          <label>cron override <input name="cron" placeholder="${esc(tpl.cron || "")}"></label>
+          ${fields}
+          <button class="primary submit" type="submit">Create</button>
+        </form>
+      </td>
+    </tr>`;
+  }).join("");
+
+  app.innerHTML = `
+    <h1>Templates</h1>
+    <div class="sub">start from the flagship agent loops instead of hand-writing job JSON</div>
+    <div class="card">
+      ${templates.length ? `<table>
+        <thead><tr><th>Template</th><th>Default</th><th>Create job</th></tr></thead>
+        <tbody>${rows}</tbody></table>`
+      : `<div class="empty">No templates available.</div>`}
+    </div>`;
+
+  document.querySelectorAll("form.templatejob").forEach((form) => {
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const tpl = templates.find((t) => t.id === ev.target.dataset.template);
+      const f = new FormData(ev.target);
+      const body = { name: String(f.get("name") || "").trim(), payload: {} };
+      const cron = String(f.get("cron") || "").trim();
+      if (cron) body.cron = cron;
+      for (const key of tpl.required_payload || []) {
+        body.payload[key] = String(f.get(`payload:${key}`) || "").trim();
+      }
+      try {
+        const job = await api(`/jobs/from-template/${tpl.id}`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        toast("job created");
+        location.hash = `#/jobs/${job.id}`;
+      } catch (e) { toast(e.message); }
+    });
+  });
+}
+
 async function jobDetailView(id) {
   const [job, runs, stats] = await Promise.all([
     api(`/jobs/${id}`), api(`/jobs/${id}/runs`), api(`/jobs/${id}/stats`),
@@ -298,6 +358,15 @@ async function runDetailView(id) {
   const run = await api(`/runs/${id}`);
   const lessons = await api(`/jobs/${run.job_id}/lessons`).catch(() => []);
   const steps = run.steps.map(stepRow).join("");
+  const actions = [
+    run.status === "awaiting_approval"
+      ? `<button class="primary" data-runact="approve" data-id="${run.id}">Approve</button>
+         <button data-runact="reject" data-id="${run.id}">Reject</button>`
+      : "",
+    ["queued", "running", "awaiting_approval"].includes(run.status)
+      ? `<button data-runact="cancel" data-id="${run.id}">Cancel</button>`
+      : "",
+  ].filter(Boolean).join("");
 
   app.innerHTML = `
     <div class="crumb"><a href="#/jobs">Jobs</a> / <a href="#/jobs/${run.job_id}">job</a> / run ${esc(run.id.slice(0, 8))}</div>
@@ -329,10 +398,7 @@ async function runDetailView(id) {
     ${run.error ? `<h2>Error</h2><div class="error-box">${esc(run.error)}</div>` : ""}
     <h2>Trace</h2>
     <div class="card" id="trace">${steps || '<div class="empty">no steps recorded yet</div>'}</div>
-    ${run.status === "awaiting_approval" ? `<div class="actions">
-      <button class="primary" data-runact="approve" data-id="${run.id}">Approve</button>
-      <button data-runact="reject" data-id="${run.id}">Reject</button>
-    </div>` : ""}`;
+    ${actions ? `<div class="actions">${actions}</div>` : ""}`;
 
   // Live trace: stream new steps over SSE while the run is in flight, so the
   // workshop grows before your eyes. Falls back to polling if SSE fails
@@ -368,6 +434,7 @@ async function approvalsView() {
       <td class="actions">
         <button class="primary" data-runact="approve" data-id="${r.id}">Approve</button>
         <button data-runact="reject" data-id="${r.id}">Reject</button>
+        <button data-runact="cancel" data-id="${r.id}">Cancel</button>
       </td>
     </tr>`).join("");
 
@@ -527,6 +594,7 @@ async function render() {
   refreshAlertCount();
   try {
     if (view === "runs" && id) await runDetailView(id);
+    else if (view === "templates") await templatesView();
     else if (view === "usage") { await usageView(); schedulePoll(15000); }
     else if (view === "approvals") { await approvalsView(); schedulePoll(5000); }
     else if (view === "failures") { await failuresView(); schedulePoll(6000); }
