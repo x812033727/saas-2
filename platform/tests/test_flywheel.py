@@ -131,6 +131,28 @@ def test_eval_cli_reuses_eval_job(session):
     assert len(eval_jobs[0].runs) == 2  # history accumulates on one job
 
 
+def test_eval_cli_separates_same_name_cases_from_different_jobs(session):
+    job_a = make_job(session, name="source-a")
+    job_b = make_job(session, name="source-b")
+    session.add(
+        EvalCase(name="smoke", job_id=job_a.id, engine="offline", payload={}, min_score=0.5)
+    )
+    session.add(
+        EvalCase(name="smoke", job_id=job_b.id, engine="offline", payload={}, min_score=0.5)
+    )
+    session.commit()
+
+    assert run_cases() == 0
+
+    from ticloud.models import Job
+
+    eval_jobs = session.scalars(select(Job).where(Job.name.like("eval:%:smoke"))).all()
+    assert {j.name for j in eval_jobs} == {
+        f"eval:{job_a.id[:8]}:smoke",
+        f"eval:{job_b.id[:8]}:smoke",
+    }
+
+
 def test_eval_case_can_be_disabled_via_api(client, session):
     case = client.post("/eval-cases", json={"name": "off-switch", "payload": {}}).json()
 

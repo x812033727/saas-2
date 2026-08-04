@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config import settings
 from ..engine import ENGINES
@@ -8,7 +8,11 @@ from ..scheduler.cron import validate_cron
 from ..validation import validate_webhook_url
 
 
-class JobCreate(BaseModel):
+class WriteModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class JobCreate(WriteModel):
     name: str = Field(min_length=1, max_length=200)
     engine: str = "offline"
     payload: dict = Field(default_factory=dict)
@@ -51,7 +55,7 @@ class JobCreate(BaseModel):
         return v
 
 
-class JobUpdate(BaseModel):
+class JobUpdate(WriteModel):
     """Partial update — only provided fields change (use model_fields_set).
     Reuses JobCreate's validators; schedule fields re-anchor next_run_at."""
 
@@ -100,7 +104,7 @@ class TemplateOut(BaseModel):
     required_payload: list[str] = Field(default_factory=list)
 
 
-class TemplateInstantiate(BaseModel):
+class TemplateInstantiate(WriteModel):
     name: str = Field(min_length=1, max_length=200)
     cron: str | None = None  # overrides the template schedule
     payload: dict = Field(default_factory=dict)  # merged over the template payload
@@ -216,13 +220,13 @@ class FailureModeOut(BaseModel):
     latest_run_id: str | None
 
 
-class PromoteRequest(BaseModel):
+class PromoteRequest(WriteModel):
     signature: str
     job_id: str | None = None
     min_score: float = Field(default=0.9, ge=0, le=1)
 
 
-class EvalCaseCreate(BaseModel):
+class EvalCaseCreate(WriteModel):
     name: str = Field(min_length=1, max_length=200)
     engine: str = "offline"
     payload: dict = Field(default_factory=dict)
@@ -251,7 +255,7 @@ class EvalCaseOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class EvalCaseUpdate(BaseModel):
+class EvalCaseUpdate(WriteModel):
     enabled: bool | None = None
 
 
@@ -267,7 +271,7 @@ class AlertOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class TenantCreate(BaseModel):
+class TenantCreate(WriteModel):
     name: str = Field(min_length=1, max_length=200)
 
 
@@ -284,7 +288,7 @@ class TenantOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class TenantUpdate(BaseModel):
+class TenantUpdate(WriteModel):
     """Partial update of a tenant's operational settings."""
 
     webhook_url: str | None = Field(default=None, max_length=500)
@@ -296,16 +300,16 @@ class TenantUpdate(BaseModel):
         return validate_webhook_url(v)
 
 
-class TenantBudget(BaseModel):
+class TenantBudget(WriteModel):
     # None clears the cap (unlimited).
     monthly_budget_usd: float | None = Field(default=None, ge=0)
 
 
-class TenantPlan(BaseModel):
+class TenantPlan(WriteModel):
     plan: str = Field(min_length=1, max_length=50)
 
 
-class ApiKeyCreate(BaseModel):
+class ApiKeyCreate(WriteModel):
     name: str = Field(default="default", min_length=1, max_length=200)
 
 

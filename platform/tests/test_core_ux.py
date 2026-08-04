@@ -46,6 +46,12 @@ def test_patch_name_conflict_and_bad_cron(client):
     assert client.patch(f"/jobs/{b['id']}", json={"cron": "nope"}).status_code == 422
 
 
+def test_patch_rejects_unknown_fields(client):
+    job = create_job(client)
+    resp = client.patch(f"/jobs/{job['id']}", json={"engine": "warp-drive"})
+    assert resp.status_code == 422
+
+
 def test_patch_missing_job_404(client):
     assert client.patch("/jobs/nope", json={"budget_usd": 1.0}).status_code == 404
 

@@ -72,6 +72,89 @@ def _ensure_new_columns() -> None:
         for name, table, cols in new_indexes:
             if table in tables:
                 conn.execute(text(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({cols})"))
+    _relax_eval_case_name_uniqueness()
+
+
+def _relax_eval_case_name_uniqueness() -> None:
+    """Move EvalCase.name uniqueness from the DB to tenant-aware API checks."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "eval_cases" not in set(inspector.get_table_names()):
+        return
+
+    dialect = engine.dialect.name
+    if dialect == "postgresql":
+        constraints = [
+            c
+            for c in inspector.get_unique_constraints("eval_cases")
+            if c.get("column_names") == ["name"]
+        ]
+        if not constraints:
+            return
+        with engine.begin() as conn:
+            preparer = conn.dialect.identifier_preparer
+            for constraint in constraints:
+                name = constraint.get("name") or "eval_cases_name_key"
+                quoted = preparer.quote_constraint(name)
+                conn.execute(
+                    text(f"ALTER TABLE eval_cases DROP CONSTRAINT IF EXISTS {quoted}")
+                )
+        return
+    if dialect != "sqlite":
+        return
+
+    with engine.connect() as conn:
+        has_unique_name = False
+        indexes = conn.execute(text("PRAGMA index_list(eval_cases)"))
+        for _, index_name, unique, *_ in indexes:
+            if not unique:
+                continue
+            indexed_cols = [
+                row[2] for row in conn.execute(text(f"PRAGMA index_info({index_name})"))
+            ]
+            if indexed_cols == ["name"]:
+                has_unique_name = True
+                break
+    if not has_unique_name:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE eval_cases RENAME TO eval_cases_old"))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE eval_cases (
+                    id VARCHAR(32) NOT NULL,
+                    name VARCHAR(200) NOT NULL,
+                    job_id VARCHAR(32),
+                    engine VARCHAR(50) NOT NULL,
+                    payload JSON NOT NULL,
+                    min_score FLOAT NOT NULL,
+                    source_signature VARCHAR(64),
+                    enabled BOOLEAN DEFAULT TRUE NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    PRIMARY KEY (id),
+                    FOREIGN KEY(job_id) REFERENCES jobs (id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO eval_cases (
+                    id, name, job_id, engine, payload, min_score,
+                    source_signature, enabled, created_at
+                )
+                SELECT
+                    id, name, job_id, engine, payload, min_score,
+                    source_signature, enabled, created_at
+                FROM eval_cases_old
+                """
+            )
+        )
+        conn.execute(text("DROP TABLE eval_cases_old"))
 
 
 def get_session() -> Session:

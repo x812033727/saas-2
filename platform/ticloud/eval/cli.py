@@ -22,7 +22,8 @@ from ..scheduler.worker import execute_run
 
 
 def _eval_job(session, case: EvalCase) -> Job:
-    name = f"eval:{case.name}"
+    prefix = f"eval:{case.job_id[:8]}:" if case.job_id else "eval:"
+    name = f"{prefix}{case.name[:200 - len(prefix)]}"
     job = session.scalar(select(Job).where(Job.name == name))
     if job is None:
         job = Job(name=name, engine=case.engine, payload=case.payload, max_retries=0)
