@@ -187,6 +187,19 @@ def test_hosted_eval_case_requires_owned_job(client, hosted):
     assert r.status_code == 404
 
 
+def test_hosted_eval_case_names_are_tenant_scoped(client, hosted):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+    job_a = client.post("/jobs", json={"name": "eval-job-a"}, headers=auth_a).json()
+    job_b = client.post("/jobs", json={"name": "eval-job-b"}, headers=auth_b).json()
+
+    spec_a = {"name": "smoke", "job_id": job_a["id"]}
+    spec_b = {"name": "smoke", "job_id": job_b["id"]}
+    assert client.post("/eval-cases", json=spec_a, headers=auth_a).status_code == 201
+    assert client.post("/eval-cases", json=spec_b, headers=auth_b).status_code == 201
+    assert client.post("/eval-cases", json=spec_a, headers=auth_a).status_code == 409
+
+
 def test_hosted_eval_case_patch_is_tenant_scoped(client, hosted):
     _, _, auth_a = _mint_tenant(client, "team-a")
     _, _, auth_b = _mint_tenant(client, "team-b")
@@ -288,6 +301,62 @@ def test_init_db_backfills_eval_case_enabled_column():
     assert "enabled" in {c["name"] for c in inspect(engine).get_columns("eval_cases")}
     with engine.begin() as conn:
         assert conn.execute(text("SELECT enabled FROM eval_cases WHERE id = 'c1'")).scalar()
+
+
+def test_init_db_removes_global_eval_case_name_unique():
+    def has_unique_name_index():
+        with engine.connect() as conn:
+            indexes = conn.execute(text("PRAGMA index_list(eval_cases)"))
+            for _, index_name, unique, *_ in indexes:
+                if not unique:
+                    continue
+                indexed_cols = [
+                    row[2]
+                    for row in conn.execute(text(f"PRAGMA index_info({index_name})"))
+                ]
+                if indexed_cols == ["name"]:
+                    return True
+        return False
+
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE eval_cases"))
+        conn.execute(
+            text(
+                """
+                CREATE TABLE eval_cases (
+                    id VARCHAR(32) NOT NULL,
+                    name VARCHAR(200) NOT NULL UNIQUE,
+                    job_id VARCHAR(32),
+                    engine VARCHAR(50) NOT NULL,
+                    payload JSON NOT NULL,
+                    min_score FLOAT NOT NULL,
+                    source_signature VARCHAR(64),
+                    enabled BOOLEAN DEFAULT TRUE NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    PRIMARY KEY (id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO eval_cases "
+                "(id, name, engine, payload, min_score, created_at) "
+                "VALUES ('c1', 'smoke', 'offline', '{}', 0.9, CURRENT_TIMESTAMP)"
+            )
+        )
+
+    assert has_unique_name_index()
+    init_db()
+    assert not has_unique_name_index()
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO eval_cases "
+                "(id, name, engine, payload, min_score, created_at) "
+                "VALUES ('c2', 'smoke', 'offline', '{}', 0.9, CURRENT_TIMESTAMP)"
+            )
+        )
 
 
 def test_worker_runs_tenant_jobs(client, hosted, session, monkeypatch):

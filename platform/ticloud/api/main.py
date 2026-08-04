@@ -540,6 +540,13 @@ def list_eval_cases(
     return session.scalars(stmt).all()
 
 
+def _eval_case_name_exists(session: Session, name: str, tenant: Tenant | None) -> bool:
+    stmt = select(EvalCase).where(EvalCase.name == name)
+    if tenant is not None:
+        stmt = stmt.where(EvalCase.job_id.in_(_tenant_job_ids(session, tenant)))
+    return session.scalar(stmt) is not None
+
+
 @app.post("/eval-cases", response_model=EvalCaseOut, status_code=201)
 def create_eval_case(
     body: EvalCaseCreate,
@@ -552,7 +559,7 @@ def create_eval_case(
         if body.job_id is None:
             raise HTTPException(422, "job_id is required in hosted mode")
         _get_job(session, body.job_id, tenant)
-    if session.scalar(select(EvalCase).where(EvalCase.name == body.name)):
+    if _eval_case_name_exists(session, body.name, tenant):
         raise HTTPException(409, f"eval case named {body.name!r} already exists")
     case = EvalCase(**body.model_dump())
     session.add(case)
@@ -676,14 +683,18 @@ def cancel_run(
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> Run:
-    """Cancel a queued or running run. A queued run is cancelled immediately;
-    a running one is flagged and the worker stops it cooperatively (the
-    schedule pause only affects future runs, not an in-flight one)."""
+    """Cancel a queued, approval-held, or running run.
+
+    Queued / approval-held runs are cancelled immediately; a running one is
+    flagged and the worker stops it cooperatively (the schedule pause only
+    affects future runs, not an in-flight one).
+    """
     run = _get_run(session, run_id, tenant)
     if run.status in TERMINAL_STATUSES:
         raise HTTPException(409, f"run already {run.status.value}")
-    if run.status == RunStatus.QUEUED:
+    if run.status in (RunStatus.QUEUED, RunStatus.AWAITING_APPROVAL):
         run.status = RunStatus.CANCELLED
+        run.error = "cancelled by user"
         run.finished_at = datetime.now(timezone.utc)
     else:  # RUNNING — the worker polls this flag and winds the engine down
         run.cancel_requested = True

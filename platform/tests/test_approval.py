@@ -65,6 +65,19 @@ def test_reject_terminates_without_running(session, client):
     assert claim_next_run(session) is None  # never runs
 
 
+def test_cancel_awaiting_approval_terminates_without_running(session, client):
+    job = create_job(client, cron=None, approval_required=True)
+    run = _trigger_and_execute(session, client, job["id"])
+
+    cancelled = client.post(f"/runs/{run['id']}/cancel").json()
+    assert cancelled["status"] == "cancelled"
+    rr = session.get(Run, run["id"])
+    assert rr.status == RunStatus.CANCELLED
+    assert rr.error == "cancelled by user"
+    assert claim_next_run(session) is None
+    assert client.get("/approvals").json() == []
+
+
 def test_rejected_approval_cannot_be_approved_later(session, client):
     job = create_job(client, cron=None, approval_required=True)
     run = _trigger_and_execute(session, client, job["id"])

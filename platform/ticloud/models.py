@@ -296,7 +296,9 @@ class EvalCase(Base):
     __tablename__ = "eval_cases"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    name: Mapped[str] = mapped_column(String(200), unique=True)
+    # Uniqueness is enforced at the API layer: global in self-host mode,
+    # tenant-scoped in hosted mode through the owning job.
+    name: Mapped[str] = mapped_column(String(200))
     job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True)
     engine: Mapped[str] = mapped_column(String(50), default="offline")
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
