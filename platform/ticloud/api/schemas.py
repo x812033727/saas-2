@@ -214,6 +214,13 @@ class LessonCreate(WriteModel):
     content: str = Field(min_length=1, max_length=5000)
     source_run_id: str | None = Field(default=None, min_length=1, max_length=32)
 
+    @field_validator("title", "content")
+    @classmethod
+    def _non_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("must not be blank")
+        return v
+
 
 class FailureModeOut(BaseModel):
     signature: str
