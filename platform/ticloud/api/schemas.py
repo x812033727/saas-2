@@ -214,11 +214,11 @@ class LessonCreate(WriteModel):
     content: str = Field(min_length=1, max_length=5000)
     source_run_id: str | None = Field(default=None, min_length=1, max_length=32)
 
-    @field_validator("title", "content")
+    @field_validator("title", "content", "source_run_id", mode="before")
     @classmethod
-    def _non_blank(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("must not be blank")
+    def _strip_outer_whitespace(cls, v: str | None) -> str | None:
+        if isinstance(v, str):
+            return v.strip()
         return v
 
 

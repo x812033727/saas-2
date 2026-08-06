@@ -21,6 +21,28 @@ def test_qa_manual_lesson_rejects_blank_fields_without_writing(client, body):
     assert client.get(f"/jobs/{job['id']}/lessons").json() == []
 
 
+def test_qa_manual_lesson_normalizes_outer_whitespace_before_upsert(client):
+    job = create_job(client, name="qa-normalized-lesson", cron=None)
+
+    created = client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={"title": " manual:retry ", "content": " keep logs "},
+    )
+    assert created.status_code == 201, created.text
+
+    updated = client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={"title": "manual:retry", "content": "preserve logs"},
+    )
+    assert updated.status_code == 201, updated.text
+
+    lessons = client.get(f"/jobs/{job['id']}/lessons").json()
+    assert len(lessons) == 1, lessons
+    assert lessons[0]["id"] == created.json()["id"]
+    assert lessons[0]["title"] == "manual:retry"
+    assert lessons[0]["content"] == "preserve logs"
+
+
 def test_qa_manual_lesson_foreign_source_update_is_atomic(client):
     target = create_job(client, name="qa-target", cron=None)
     source = create_job(client, name="qa-source", cron=None)
