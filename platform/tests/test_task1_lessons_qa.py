@@ -10,6 +10,7 @@ from test_api import create_job
         {"title": "manual:blank-content", "content": ""},
         {"title": "   ", "content": "whitespace title should not become a lesson"},
         {"title": "manual:blank-body", "content": "   "},
+        {"title": "manual:blank-source", "content": "keep source clean", "source_run_id": "   "},
     ],
 )
 def test_qa_manual_lesson_rejects_blank_fields_without_writing(client, body):
@@ -18,6 +19,23 @@ def test_qa_manual_lesson_rejects_blank_fields_without_writing(client, body):
     resp = client.post(f"/jobs/{job['id']}/lessons", json=body)
 
     assert resp.status_code == 422, (body, resp.status_code, resp.text)
+    assert client.get(f"/jobs/{job['id']}/lessons").json() == []
+
+
+def test_qa_manual_lesson_rejects_extra_fields_without_writing(client):
+    job = create_job(client, name="qa-extra-lesson-field", cron=None)
+
+    resp = client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={
+            "title": "manual:extra-field",
+            "content": "should not be partially accepted",
+            "job_id": job["id"],
+        },
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert "job_id" in resp.text
     assert client.get(f"/jobs/{job['id']}/lessons").json() == []
 
 

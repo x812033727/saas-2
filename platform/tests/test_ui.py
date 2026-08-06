@@ -114,6 +114,21 @@ def test_ui_exposes_manual_lesson_controls(client):
     assert "`/jobs/${lessonBtn.dataset.job}/lessons/${lessonBtn.dataset.dellesson}`" in app_js
 
 
+def test_ui_manual_lesson_payload_is_trimmed_before_submit(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert 'title: String(f.get("title") || "").trim()' in app_js
+    assert 'content: String(f.get("content") || "").trim()' in app_js
+
+
+def test_ui_manual_lesson_delete_handler_precedes_generic_job_action(client):
+    app_js = client.get("/ui/app.js").text
+
+    lesson_delete = app_js.index('button[data-dellesson]')
+    generic_action = app_js.index('button[data-act]')
+    assert lesson_delete < generic_action
+
+
 def test_ui_exposes_job_scoped_failure_mode_controls(client):
     index = client.get("/ui/").text
     app_js = client.get("/ui/app.js").text
