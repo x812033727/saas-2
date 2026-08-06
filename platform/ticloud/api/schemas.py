@@ -209,6 +209,12 @@ class LessonOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class LessonCreate(WriteModel):
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=5000)
+    source_run_id: str | None = Field(default=None, min_length=1, max_length=32)
+
+
 class FailureModeOut(BaseModel):
     signature: str
     summary: str

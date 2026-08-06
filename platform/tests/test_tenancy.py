@@ -110,6 +110,35 @@ def test_tenant_isolation_matrix(client, hosted):
     assert client.get("/overview", headers=auth_b).json() == []
 
 
+def test_hosted_lessons_are_tenant_scoped(client, hosted):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+
+    job = client.post("/jobs", json={"name": "a-lesson-job"}, headers=auth_a).json()
+    lesson = client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={"title": "manual:ops", "content": "Keep the deployment note."},
+        headers=auth_a,
+    ).json()
+
+    assert [l["id"] for l in client.get(f"/jobs/{job['id']}/lessons", headers=auth_a).json()] == [
+        lesson["id"]
+    ]
+    assert client.get(f"/jobs/{job['id']}/lessons", headers=auth_b).status_code == 404
+    assert (
+        client.post(
+            f"/jobs/{job['id']}/lessons",
+            json={"title": "manual:ops", "content": "foreign edit"},
+            headers=auth_b,
+        ).status_code
+        == 404
+    )
+    assert (
+        client.delete(f"/jobs/{job['id']}/lessons/{lesson['id']}", headers=auth_b).status_code
+        == 404
+    )
+
+
 def test_hosted_job_ownership_and_failure_scoping(client, hosted, session):
     tenant_a, _, auth_a = _mint_tenant(client, "team-a")
     _, _, auth_b = _mint_tenant(client, "team-b")

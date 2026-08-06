@@ -33,6 +33,7 @@ from ..models import (
     RunStatus,
     RunStep,
     Tenant,
+    utcnow,
 )
 from ..scheduler.cron import compute_next_run
 from ..scheduler.queue import enqueue_manual, enqueue_rerun
@@ -50,6 +51,7 @@ from .schemas import (
     JobOut,
     JobUpdate,
     JobWithLastRun,
+    LessonCreate,
     LessonOut,
     PromoteRequest,
     RunDetailOut,
@@ -466,6 +468,61 @@ def job_lessons(
     return session.scalars(
         select(Lesson).where(Lesson.job_id == job_id).order_by(Lesson.updated_at.desc()).limit(50)
     ).all()
+
+
+def _validate_lesson_source_run(session: Session, job: Job, source_run_id: str | None) -> None:
+    if source_run_id is None:
+        return
+    run = session.get(Run, source_run_id)
+    if run is None or run.job_id != job.id:
+        raise HTTPException(404, "source run not found")
+
+
+@app.post("/jobs/{job_id}/lessons", response_model=LessonOut, status_code=201)
+def create_lesson(
+    job_id: str,
+    body: LessonCreate,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> Lesson:
+    """Add or update a job lesson without waiting for an automatic failure."""
+    job = _get_job(session, job_id, tenant)
+    _validate_lesson_source_run(session, job, body.source_run_id)
+    existing = session.scalar(
+        select(Lesson).where(Lesson.job_id == job.id, Lesson.title == body.title)
+    )
+    if existing is not None:
+        existing.content = body.content
+        if "source_run_id" in body.model_fields_set:
+            existing.source_run_id = body.source_run_id
+        existing.updated_at = utcnow()
+        session.commit()
+        return existing
+
+    lesson = Lesson(
+        job_id=job.id,
+        title=body.title,
+        content=body.content,
+        source_run_id=body.source_run_id,
+    )
+    session.add(lesson)
+    session.commit()
+    return lesson
+
+
+@app.delete("/jobs/{job_id}/lessons/{lesson_id}", status_code=204)
+def delete_lesson(
+    job_id: str,
+    lesson_id: str,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> None:
+    _get_job(session, job_id, tenant)
+    lesson = session.scalar(select(Lesson).where(Lesson.id == lesson_id, Lesson.job_id == job_id))
+    if lesson is None:
+        raise HTTPException(404, "lesson not found")
+    session.delete(lesson)
+    session.commit()
 
 
 @app.get("/failure-modes", response_model=list[FailureModeOut])

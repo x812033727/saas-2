@@ -140,8 +140,8 @@ button.primary:hover { opacity: 0.9; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* Compact edit forms */
-form.newjob, form.jobsettings { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-form.newjob label, form.jobsettings label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+form.newjob, form.jobsettings, form.lessonform { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+form.newjob label, form.jobsettings label, form.lessonform label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 form.newjob label.checkrow, form.jobsettings label.checkrow {
   flex-direction: row;
   align-items: center;
@@ -150,7 +150,7 @@ form.newjob label.checkrow, form.jobsettings label.checkrow {
   color: var(--ink-2);
 }
 form.newjob label.checkrow input, form.jobsettings label.checkrow input { width: auto; }
-form.newjob input, form.newjob select, form.jobsettings input, form.jobsettings select {
+form.newjob input, form.newjob select, form.jobsettings input, form.jobsettings select, form.lessonform input, form.lessonform textarea {
   font: inherit;
   font-size: 14px;
   padding: 5px 8px;
@@ -159,12 +159,14 @@ form.newjob input, form.newjob select, form.jobsettings input, form.jobsettings 
   background: var(--surface);
   color: var(--ink);
 }
+form.lessonform textarea { resize: vertical; min-height: 76px; }
 form.newjob label.checkrow input, form.jobsettings label.checkrow input {
   width: auto;
   padding: 0;
   border-radius: 3px;
 }
-form.newjob .submit, form.jobsettings .submit { align-self: end; }
+form.newjob .submit, form.jobsettings .submit, form.lessonform .submit { align-self: end; }
+form.lessonform { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--grid); }
 details.panel summary { cursor: pointer; color: var(--series-1); font-size: 14px; margin-bottom: 8px; }
 
 /* Stat tiles */
