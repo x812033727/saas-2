@@ -209,6 +209,19 @@ class LessonOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class LessonCreate(WriteModel):
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1, max_length=5000)
+    source_run_id: str | None = Field(default=None, min_length=1, max_length=32)
+
+    @field_validator("title", "content", "source_run_id", mode="before")
+    @classmethod
+    def _strip_outer_whitespace(cls, v: str | None) -> str | None:
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+
 class FailureModeOut(BaseModel):
     signature: str
     summary: str

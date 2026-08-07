@@ -106,6 +106,34 @@ def test_promote_failure_mode_to_eval_case(client):
     assert client.get("/eval-cases").json() == []
 
 
+def test_promote_failure_mode_can_target_one_job_when_signature_is_shared(client):
+    from test_api import create_job
+
+    job_a = create_job(client, name="flaky-a", cron=None, max_retries=0, payload={"fail_at": 2})
+    job_b = create_job(client, name="flaky-b", cron=None, max_retries=0, payload={"fail_at": 2})
+    for job in (job_a, job_b):
+        run = client.post(f"/jobs/{job['id']}/trigger").json()
+        execute_run(run["id"])
+
+    sig_a = client.get(f"/failure-modes?job_id={job_a['id']}").json()[0]["signature"]
+    sig_b = client.get(f"/failure-modes?job_id={job_b['id']}").json()[0]["signature"]
+    assert sig_a == sig_b
+
+    case_b = client.post(
+        "/failure-modes/promote",
+        json={"signature": sig_b, "job_id": job_b["id"]},
+    ).json()
+    case_a = client.post(
+        "/failure-modes/promote",
+        json={"signature": sig_a, "job_id": job_a["id"]},
+    ).json()
+
+    assert case_b["job_id"] == job_b["id"]
+    assert case_b["name"] == f"regression-{job_b['id'][:8]}-{sig_b}"
+    assert case_a["job_id"] == job_a["id"]
+    assert case_a["name"] == f"regression-{job_a['id'][:8]}-{sig_a}"
+
+
 def test_eval_cli_passes_on_good_case(session):
     session.add(EvalCase(name="smoke", engine="offline", payload={}, min_score=0.9))
     session.commit()
@@ -180,3 +208,55 @@ def test_lessons_api(client):
     lessons = client.get(f"/jobs/{job['id']}/lessons").json()
     assert len(lessons) == 1
     assert lessons[0]["title"].startswith("failure:")
+
+
+def test_manual_lessons_api_create_update_and_delete(client):
+    from test_api import create_job
+
+    job = create_job(client, cron=None)
+    run = client.post(f"/jobs/{job['id']}/trigger").json()
+    execute_run(run["id"])
+
+    created = client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={
+            "title": "manual:retry-policy",
+            "content": "Back off flaky CI before rerunning.",
+            "source_run_id": run["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    lesson = created.json()
+    assert lesson["source_run_id"] == run["id"]
+
+    updated = client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={
+            "title": "manual:retry-policy",
+            "content": "Back off flaky CI and preserve failure logs.",
+        },
+    ).json()
+    assert updated["id"] == lesson["id"]
+    assert updated["content"] == "Back off flaky CI and preserve failure logs."
+    assert updated["source_run_id"] == run["id"]
+
+    listed = client.get(f"/jobs/{job['id']}/lessons").json()
+    assert [l["id"] for l in listed] == [lesson["id"]]
+
+    assert client.delete(f"/jobs/{job['id']}/lessons/{lesson['id']}").status_code == 204
+    assert client.get(f"/jobs/{job['id']}/lessons").json() == []
+
+
+def test_manual_lesson_source_run_must_belong_to_job(client):
+    from test_api import create_job
+
+    source_job = create_job(client, name="source", cron=None)
+    target_job = create_job(client, name="target", cron=None)
+    run = client.post(f"/jobs/{source_job['id']}/trigger").json()
+
+    resp = client.post(
+        f"/jobs/{target_job['id']}/lessons",
+        json={"title": "manual:foreign", "content": "nope", "source_run_id": run["id"]},
+    )
+
+    assert resp.status_code == 404

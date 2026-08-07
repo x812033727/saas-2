@@ -103,6 +103,43 @@ def test_ui_exposes_job_settings_editor(client):
     assert 'name="webhook_url"' in app_js
 
 
+def test_ui_exposes_manual_lesson_controls(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert 'class="lessonform"' in app_js
+    assert 'name="title"' in app_js
+    assert 'name="content"' in app_js
+    assert "`/jobs/${id}/lessons`" in app_js
+    assert "data-dellesson" in app_js
+    assert "`/jobs/${lessonBtn.dataset.job}/lessons/${lessonBtn.dataset.dellesson}`" in app_js
+
+
+def test_ui_manual_lesson_payload_is_trimmed_before_submit(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert 'title: String(f.get("title") || "").trim()' in app_js
+    assert 'content: String(f.get("content") || "").trim()' in app_js
+
+
+def test_ui_manual_lesson_delete_handler_precedes_generic_job_action(client):
+    app_js = client.get("/ui/app.js").text
+
+    lesson_delete = app_js.index('button[data-dellesson]')
+    generic_action = app_js.index('button[data-act]')
+    assert lesson_delete < generic_action
+
+
+def test_ui_exposes_job_scoped_failure_mode_controls(client):
+    index = client.get("/ui/").text
+    app_js = client.get("/ui/app.js").text
+
+    assert 'href="#/failures"' in index
+    assert "`/failure-modes?job_id=${encodeURIComponent(id)}`" in app_js
+    assert 'data-promote="${esc(m.signature)}" data-job="${esc(job.id)}"' in app_js
+    assert "body.job_id = promoteBtn.dataset.job" in app_js
+    assert "Regression eval cases" in app_js
+
+
 def test_overview_includes_last_run(client):
     job = create_job(client, cron=None)
     create_job(client, name="second-job", cron=None)

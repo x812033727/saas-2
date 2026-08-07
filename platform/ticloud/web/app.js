@@ -200,9 +200,16 @@ async function jobsView() {
 }
 
 async function jobDetailView(id) {
-  const [job, runs, stats] = await Promise.all([
-    api(`/jobs/${id}`), api(`/jobs/${id}/runs`), api(`/jobs/${id}/stats`),
+  const [job, runs, stats, lessons, modes, cases] = await Promise.all([
+    api(`/jobs/${id}`),
+    api(`/jobs/${id}/runs`),
+    api(`/jobs/${id}/stats`),
+    api(`/jobs/${id}/lessons`),
+    api(`/failure-modes?job_id=${encodeURIComponent(id)}`),
+    api("/eval-cases"),
   ]);
+  const jobCases = cases.filter((c) => c.job_id === id);
+  const promoted = new Set(jobCases.map((c) => c.source_signature).filter(Boolean));
   const rows = runs.map((r) => `
     <tr class="rowlink" data-href="#/runs/${r.id}">
       <td>${badge(r.status)}</td>
@@ -227,6 +234,57 @@ async function jobDetailView(id) {
       <div class="tile"><div class="k">runs recorded</div><div class="v">${runs.length}</div></div>
     </div>
     ${jobSettingsForm(job)}
+    <h2>Lessons</h2>
+    <div class="card">
+      <div class="lesson-list">
+        ${lessons.length ? lessons.map((l) => `
+          <div class="step">
+            <span class="role other">lesson</span>
+            <span class="name"><strong>${esc(l.title)}</strong><br><small style="color:var(--ink-2)">${esc(l.content)}</small></span>
+            <span class="meta">${relTime(l.updated_at)}</span>
+            <button data-dellesson="${esc(l.id)}" data-job="${esc(job.id)}">Delete</button>
+          </div>`).join("") : `<div class="empty">No lessons yet — add one after you fix a recurring issue.</div>`}
+      </div>
+      <form class="lessonform" id="lessonform">
+        <label>title <input name="title" required maxlength="200" placeholder="manual:retry-policy"></label>
+        <label>content <textarea name="content" required maxlength="5000" rows="3" placeholder="What should this job remember next time?"></textarea></label>
+        <button class="primary submit" type="submit">Save lesson</button>
+      </form>
+    </div>
+    <h2>Failure modes</h2>
+    <div class="card">
+      ${modes.length ? `<table>
+        <thead><tr><th>Signature</th><th>Error</th><th class="num">Count</th><th>Last seen</th><th></th></tr></thead>
+        <tbody>${modes.map((m) => `
+          <tr>
+            <td><code style="font-size:12px">${esc(m.signature)}</code></td>
+            <td style="max-width:420px">${esc(m.summary)}
+              ${m.latest_run_id ? `<br><a href="#/runs/${m.latest_run_id}"><small>latest run</small></a>` : ""}</td>
+            <td class="num">${m.count}</td>
+            <td>${relTime(m.last_seen)}</td>
+            <td class="actions">${promoted.has(m.signature)
+              ? '<span style="color:var(--good-text);font-size:13px">✓ eval case</span>'
+              : `<button class="primary" data-promote="${esc(m.signature)}" data-job="${esc(job.id)}">Promote</button>`}</td>
+          </tr>`).join("")}</tbody></table>`
+        : `<div class="empty">No failed runs for this job yet.</div>`}
+    </div>
+    <h2>Regression eval cases</h2>
+    <div class="card">
+      ${jobCases.length ? `<table>
+        <thead><tr><th>Name</th><th>Engine</th><th class="num">Min score</th><th>Source</th><th></th></tr></thead>
+        <tbody>${jobCases.map((c) => `
+          <tr>
+            <td><strong>${esc(c.name)}</strong>${c.enabled ? "" : ' <small style="color:var(--muted)">(disabled)</small>'}</td>
+            <td>${esc(c.engine)}</td>
+            <td class="num">${fmtScore(c.min_score)}</td>
+            <td>${c.source_signature ? `<code style="font-size:12px">${esc(c.source_signature)}</code>` : '<span style="color:var(--muted)">manual</span>'}</td>
+            <td class="actions">
+              <button data-togglecase="${c.id}" data-enabled="${c.enabled ? "false" : "true"}">${c.enabled ? "Disable" : "Enable"}</button>
+              <button data-delcase="${c.id}">Delete</button>
+            </td>
+          </tr>`).join("")}</tbody></table>`
+        : `<div class="empty">No regression eval cases for this job yet.</div>`}
+    </div>
     <h2>Quality score per run (last ${stats.length})</h2>
     <div class="card">${sparkline(stats, {
       value: (p) => p.score, format: fmtScore, label: "quality score per run",
@@ -279,6 +337,20 @@ async function jobDetailView(id) {
     try {
       await api(`/jobs/${id}`, { method: "PATCH", body: JSON.stringify(body) });
       toast("job updated");
+      render();
+    } catch (e) { toast(e.message); }
+  });
+
+  document.getElementById("lessonform").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const body = {
+      title: String(f.get("title") || "").trim(),
+      content: String(f.get("content") || "").trim(),
+    };
+    try {
+      await api(`/jobs/${id}/lessons`, { method: "POST", body: JSON.stringify(body) });
+      toast("lesson saved");
       render();
     } catch (e) { toast(e.message); }
   });
@@ -556,9 +628,11 @@ app.addEventListener("click", (ev) => {
   const promoteBtn = ev.target.closest("button[data-promote]");
   if (promoteBtn) {
     ev.stopPropagation();
+    const body = { signature: promoteBtn.dataset.promote };
+    if (promoteBtn.dataset.job) body.job_id = promoteBtn.dataset.job;
     api("/failure-modes/promote", {
       method: "POST",
-      body: JSON.stringify({ signature: promoteBtn.dataset.promote }),
+      body: JSON.stringify(body),
     }).then(() => { toast("eval case created"); render(); }).catch((e) => toast(e.message));
     return;
   }
@@ -575,6 +649,12 @@ app.addEventListener("click", (ev) => {
       method: "PATCH",
       body: JSON.stringify({ enabled: toggleBtn.dataset.enabled === "true" }),
     }).then(() => { toast("eval case updated"); render(); }).catch((e) => toast(e.message));
+    return;
+  }
+  const lessonBtn = ev.target.closest("button[data-dellesson]");
+  if (lessonBtn) {
+    ev.stopPropagation();
+    act("DELETE", `/jobs/${lessonBtn.dataset.job}/lessons/${lessonBtn.dataset.dellesson}`, render);
     return;
   }
   const btn = ev.target.closest("button[data-act]");
