@@ -75,6 +75,27 @@ h2 { font-size: 15px; margin: 24px 0 8px; color: var(--ink-2); }
 .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
 a { color: var(--series-1); }
 
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.tabs a {
+  color: var(--ink-2);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.tabs a:hover { border-color: var(--series-1); color: var(--series-1); }
+.tabs a.active {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: #fff;
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);

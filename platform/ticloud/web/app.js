@@ -389,8 +389,17 @@ async function approvalsView() {
     </div>`;
 }
 
-async function alertsView() {
-  const alerts = await api("/alerts?limit=100");
+async function alertsView(filter = "all") {
+  filter = ["open", "acked"].includes(filter) ? filter : "all";
+  const filterQuery = filter === "open"
+    ? "&acknowledged=false"
+    : filter === "acked"
+      ? "&acknowledged=true"
+      : "";
+  const [alerts, openAlerts] = await Promise.all([
+    api(`/alerts?limit=100${filterQuery}`),
+    api("/alerts?acknowledged=false&limit=1"),
+  ]);
   const ALERT_BADGE = {
     auto_paused: ["paused", "‖ auto-paused"],
     run_failed: ["failed", "✕ run failed"],
@@ -413,11 +422,17 @@ async function alertsView() {
   app.innerHTML = `
     <h1>Alerts</h1>
     <div class="sub">what the quality gate and retry-exhaustion caught while nobody was watching</div>
+    <div class="tabs" aria-label="Alert filters">
+      <a class="${filter === "all" ? "active" : ""}" href="#/alerts">All</a>
+      <a class="${filter === "open" ? "active" : ""}" href="#/alerts/open">Open</a>
+      <a class="${filter === "acked" ? "active" : ""}" href="#/alerts/acked">Acked</a>
+    </div>
+    ${filter !== "acked" && openAlerts.length ? `<div style="margin-bottom:12px"><button data-ack-all>Ack all open</button></div>` : ""}
     <div class="card">
       ${alerts.length ? `<table>
         <thead><tr><th>Kind</th><th>Message</th><th>When</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table>`
-      : `<div class="empty">No alerts — everything your agents shipped passed the gate.</div>`}
+      : `<div class="empty">No ${filter === "all" ? "" : `${filter} `}alerts.</div>`}
     </div>`;
 }
 
@@ -470,10 +485,10 @@ async function failuresView() {
 
 async function refreshAlertCount() {
   try {
-    const open = await api("/alerts?acknowledged=false&limit=100");
+    const summary = await api("/alerts/summary");
     const el = document.getElementById("alert-count");
-    el.textContent = open.length;
-    el.hidden = open.length === 0;
+    el.textContent = summary.unacknowledged;
+    el.hidden = summary.unacknowledged === 0;
   } catch { /* topbar badge is best-effort */ }
 }
 
@@ -537,7 +552,7 @@ async function render() {
     else if (view === "usage") { await usageView(); schedulePoll(15000); }
     else if (view === "approvals") { await approvalsView(); schedulePoll(5000); }
     else if (view === "failures") { await failuresView(); schedulePoll(6000); }
-    else if (view === "alerts") { await alertsView(); schedulePoll(5000); }
+    else if (view === "alerts") { await alertsView(id || "all"); schedulePoll(5000); }
     else if (view === "jobs" && id) { await jobDetailView(id); schedulePoll(3000); }
     else { await jobsView(); schedulePoll(3000); }
   } catch (e) {
@@ -551,6 +566,11 @@ app.addEventListener("click", (ev) => {
   if (ackBtn) {
     ev.stopPropagation();
     act("POST", `/alerts/${ackBtn.dataset.ack}/ack`, render);
+    return;
+  }
+  if (ev.target.closest("button[data-ack-all]")) {
+    ev.stopPropagation();
+    act("POST", "/alerts/ack-all", render);
     return;
   }
   const promoteBtn = ev.target.closest("button[data-promote]");

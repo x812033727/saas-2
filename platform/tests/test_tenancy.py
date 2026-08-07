@@ -11,7 +11,7 @@ from sqlalchemy import inspect, text
 from test_worker import run_job_once
 from ticloud.config import settings
 from ticloud.db import engine, init_db
-from ticloud.models import Job
+from ticloud.models import Alert, Job
 
 ADMIN = {"Authorization": "Bearer admin-secret"}
 
@@ -146,6 +146,28 @@ def test_hosted_job_ownership_and_failure_scoping(client, hosted, session):
     assert [c["id"] for c in client.get("/eval-cases", headers=auth_a).json()] == [case["id"]]
     assert client.get("/eval-cases", headers=auth_b).json() == []
     assert client.delete(f"/eval-cases/{case['id']}", headers=auth_b).status_code == 404
+
+
+def test_ack_all_alerts_scoped_by_tenant(client, hosted, session):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+    job_a = client.post("/jobs", json={"name": "a-alerts"}, headers=auth_a).json()
+    job_b = client.post("/jobs", json={"name": "b-alerts"}, headers=auth_b).json()
+    session.add_all([
+        Alert(job_id=job_a["id"], kind="low_score", message="a"),
+        Alert(job_id=job_b["id"], kind="low_score", message="b"),
+    ])
+    session.commit()
+
+    assert client.get("/alerts/summary", headers=auth_a).json() == {"unacknowledged": 1}
+    assert client.get("/alerts/summary", headers=auth_b).json() == {"unacknowledged": 1}
+    assert client.post("/alerts/ack-all", headers=auth_a).json() == {"acknowledged": 1}
+    assert client.get("/alerts/summary", headers=auth_a).json() == {"unacknowledged": 0}
+    assert client.get("/alerts/summary", headers=auth_b).json() == {"unacknowledged": 1}
+    assert client.get("/alerts?acknowledged=false", headers=auth_a).json() == []
+    alerts_b = client.get("/alerts?acknowledged=false", headers=auth_b).json()
+    assert len(alerts_b) == 1
+    assert alerts_b[0]["job_id"] == job_b["id"]
 
 
 def test_tenants_have_independent_name_namespaces(client, hosted, session):

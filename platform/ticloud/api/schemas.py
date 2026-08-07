@@ -271,6 +271,14 @@ class AlertOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AlertAckSummary(BaseModel):
+    acknowledged: int
+
+
+class AlertSummary(BaseModel):
+    unacknowledged: int
+
+
 class TenantCreate(WriteModel):
     name: str = Field(min_length=1, max_length=200)
 

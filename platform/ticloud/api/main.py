@@ -38,7 +38,9 @@ from ..scheduler.cron import compute_next_run
 from ..scheduler.queue import enqueue_manual, enqueue_rerun
 from .auth import generate_key, hash_key, make_current_tenant, require_admin
 from .schemas import (
+    AlertAckSummary,
     AlertOut,
+    AlertSummary,
     ApiKeyCreate,
     ApiKeyCreated,
     ApiKeyOut,
@@ -441,6 +443,17 @@ def list_alerts(
     ).all()
 
 
+@app.get("/alerts/summary", response_model=AlertSummary)
+def alerts_summary(
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> AlertSummary:
+    stmt = select(func.count(Alert.id)).where(Alert.acknowledged.is_(False))
+    if tenant is not None:
+        stmt = stmt.where(Alert.job_id.in_(_tenant_job_ids(session, tenant)))
+    return AlertSummary(unacknowledged=session.scalar(stmt) or 0)
+
+
 @app.post("/alerts/{alert_id}/ack", response_model=AlertOut)
 def ack_alert(
     alert_id: str,
@@ -454,6 +467,21 @@ def ack_alert(
     alert.acknowledged = True
     session.commit()
     return alert
+
+
+@app.post("/alerts/ack-all", response_model=AlertAckSummary)
+def ack_all_alerts(
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> AlertAckSummary:
+    stmt = select(Alert).where(Alert.acknowledged.is_(False))
+    if tenant is not None:
+        stmt = stmt.where(Alert.job_id.in_(_tenant_job_ids(session, tenant)))
+    alerts = session.scalars(stmt).all()
+    for alert in alerts:
+        alert.acknowledged = True
+    session.commit()
+    return AlertAckSummary(acknowledged=len(alerts))
 
 
 @app.get("/jobs/{job_id}/lessons", response_model=list[LessonOut])
