@@ -1,7 +1,26 @@
 from test_api import create_job
-from ticloud.models import Run, RunStatus
+import pytest
+
+from ticloud.config import settings
+from ticloud.models import Alert, Run, RunStatus
 from ticloud.scheduler.queue import claim_next_run
 from ticloud.scheduler.worker import execute_run
+
+ADMIN = {"Authorization": "Bearer admin-secret"}
+
+
+@pytest.fixture
+def qa_hosted(monkeypatch):
+    monkeypatch.setattr(settings, "admin_token", "admin-secret")
+    monkeypatch.setattr(settings, "auth_mode", "required")
+
+
+def _mint_tenant(client, name):
+    tenant = client.post("/admin/tenants", json={"name": name}, headers=ADMIN).json()
+    key = client.post(
+        f"/admin/tenants/{tenant['id']}/keys", json={"name": "qa"}, headers=ADMIN
+    ).json()
+    return tenant, {"Authorization": f"Bearer {key['secret']}"}
 
 
 def _hold_for_approval(session, client):
@@ -77,3 +96,65 @@ def test_qa_job_create_rejects_unknown_top_level_but_allows_payload_keys(client)
     )
     assert good.status_code == 201, good.text
     assert good.json()["payload"] == {"arbitrary": {"nested": True}}
+
+
+def test_qa_ack_all_counts_only_currently_open_alerts_and_keeps_filter_limits(client, session):
+    job = create_job(client, cron=None)
+    session.add_all(
+        [
+            Alert(job_id=job["id"], kind="low_score", message="open-a"),
+            Alert(job_id=job["id"], kind="run_failed", message="open-b"),
+            Alert(
+                job_id=job["id"],
+                kind="auto_paused",
+                message="already-acked",
+                acknowledged=True,
+            ),
+        ]
+    )
+    session.commit()
+
+    assert client.get("/alerts?limit=0").status_code == 422
+    assert client.get("/alerts?limit=501").status_code == 422
+
+    limited_open = client.get("/alerts?acknowledged=false&limit=1").json()
+    assert len(limited_open) == 1
+    assert limited_open[0]["acknowledged"] is False
+
+    assert client.post("/alerts/ack-all").json() == {"acknowledged": 2}
+    assert client.get("/alerts?acknowledged=false").json() == []
+    acked = client.get("/alerts?acknowledged=true").json()
+    assert {alert["message"] for alert in acked} == {
+        "open-a",
+        "open-b",
+        "already-acked",
+    }
+    assert client.post("/alerts/ack-all").json() == {"acknowledged": 0}
+
+
+def test_qa_ack_all_empty_tenant_does_not_ack_foreign_alerts(client, qa_hosted, session):
+    _, empty_auth = _mint_tenant(client, "empty-team")
+    _, owner_auth = _mint_tenant(client, "owner-team")
+    job = client.post("/jobs", json={"name": "owner-job"}, headers=owner_auth).json()
+    session.add(Alert(job_id=job["id"], kind="low_score", message="owner-open"))
+    session.commit()
+
+    assert client.get("/alerts/summary", headers=empty_auth).json() == {"unacknowledged": 0}
+    assert client.post("/alerts/ack-all", headers=empty_auth).json() == {"acknowledged": 0}
+
+    assert client.get("/alerts/summary", headers=owner_auth).json() == {"unacknowledged": 1}
+    owner_open = client.get("/alerts?acknowledged=false", headers=owner_auth).json()
+    assert len(owner_open) == 1
+    assert owner_open[0]["message"] == "owner-open"
+
+
+def test_qa_alert_filter_ui_has_unknown_route_and_acked_tab_guards(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert 'filter = ["open", "acked"].includes(filter) ? filter : "all";' in app_js
+    assert 'api("/alerts?acknowledged=false&limit=1")' in app_js
+    assert 'filter !== "acked" && openAlerts.length' in app_js
+    assert 'href="#/alerts/open"' in app_js
+    assert 'href="#/alerts/acked"' in app_js
+    assert "flex-wrap: wrap;" in style_css
