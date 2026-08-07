@@ -93,6 +93,22 @@ def test_ui_exposes_rerun_control(client):
     assert "`#/runs/${run.id}`" in app_js
 
 
+def test_ui_exposes_alert_filters_and_bulk_ack(client):
+    index = client.get("/ui/").text
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert 'href="#/alerts/open">Alerts' in index
+    assert 'api("/alerts/summary")' in app_js
+    assert "summary.unacknowledged" in app_js
+    assert 'href="#/alerts/open"' in app_js
+    assert 'href="#/alerts/acked"' in app_js
+    assert "acknowledged=false" in app_js
+    assert "acknowledged=true" in app_js
+    assert "data-ack-all" in app_js
+    assert ".tabs a.active" in style_css
+
+
 def test_ui_exposes_job_settings_editor(client):
     app_js = client.get("/ui/app.js").text
 

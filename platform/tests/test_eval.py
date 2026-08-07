@@ -183,3 +183,19 @@ def test_alerts_api(client):
     assert {s["scorer"] for s in detail["scores"]} >= {"completion", "trajectory"}
     stats = client.get(f"/jobs/{job['id']}/stats").json()
     assert stats[0]["score"] == 0.0
+
+
+def test_alerts_ack_all_api(client):
+    from test_api import create_job
+
+    job = create_job(client, cron=None, score_threshold=0.9,
+                     on_low_score="alert", max_retries=0, payload={"fail_at": 0})
+    run = client.post(f"/jobs/{job['id']}/trigger").json()
+    execute_run(run["id"])
+
+    assert len(client.get("/alerts?acknowledged=false").json()) == 2
+    assert client.get("/alerts/summary").json() == {"unacknowledged": 2}
+    assert client.post("/alerts/ack-all").json() == {"acknowledged": 2}
+    assert client.get("/alerts/summary").json() == {"unacknowledged": 0}
+    assert client.get("/alerts?acknowledged=false").json() == []
+    assert client.post("/alerts/ack-all").json() == {"acknowledged": 0}
