@@ -142,4 +142,9 @@ def build_job_fields(template: dict, name: str, cron: str | None, payload_overri
 
 def missing_required(template: dict, payload: dict) -> list[str]:
     """Required payload keys that are absent or blank after merging."""
-    return [k for k in template.get("required_payload", []) if not payload.get(k)]
+    return [
+        k
+        for k in template.get("required_payload", [])
+        if payload.get(k) is None
+        or (isinstance(payload.get(k), str) and not payload.get(k).strip())
+    ]

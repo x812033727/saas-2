@@ -19,9 +19,26 @@ def test_create_job_computes_schedule(client):
     assert job["paused"] is False
 
 
+def test_create_job_strips_and_rejects_blank_name(client):
+    job = create_job(client, name="  nightly-patrol  ")
+    assert job["name"] == "nightly-patrol"
+
+    resp = client.post("/jobs", json={"name": "   "})
+    assert resp.status_code == 422
+
+
 def test_create_job_rejects_bad_cron(client):
     resp = client.post("/jobs", json={"name": "x", "cron": "not a cron"})
     assert resp.status_code == 422
+
+
+def test_create_job_rejects_dual_schedule(client):
+    resp = client.post(
+        "/jobs",
+        json={"name": "x", "cron": "0 2 * * *", "interval_seconds": 3600},
+    )
+    assert resp.status_code == 422
+    assert "mutually exclusive" in resp.text
 
 
 def test_create_job_rejects_unknown_engine(client):
@@ -33,6 +50,8 @@ def test_duplicate_name_conflicts(client):
     create_job(client)
     resp = client.post("/jobs", json={"name": "nightly-patrol"})
     assert resp.status_code == 409
+    trimmed = client.post("/jobs", json={"name": "  nightly-patrol  "})
+    assert trimmed.status_code == 409
 
 
 def test_pause_resume(client):
@@ -41,6 +60,34 @@ def test_pause_resume(client):
     resumed = client.post(f"/jobs/{job['id']}/resume").json()
     assert resumed["paused"] is False
     assert resumed["next_run_at"] is not None
+
+
+def test_update_job_requires_clearing_existing_schedule(client):
+    job = create_job(client)
+
+    blocked = client.patch(f"/jobs/{job['id']}", json={"interval_seconds": 3600})
+    assert blocked.status_code == 422
+    assert "mutually exclusive" in blocked.text
+
+    switched = client.patch(
+        f"/jobs/{job['id']}",
+        json={"cron": None, "interval_seconds": 3600},
+    )
+    assert switched.status_code == 200, switched.text
+    assert switched.json()["cron"] is None
+    assert switched.json()["interval_seconds"] == 3600
+    assert switched.json()["next_run_at"] is not None
+
+
+def test_update_job_strips_and_rejects_blank_name(client):
+    job = create_job(client)
+
+    renamed = client.patch(f"/jobs/{job['id']}", json={"name": "  patrol-v2  "})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "patrol-v2"
+
+    blank = client.patch(f"/jobs/{job['id']}", json={"name": "   "})
+    assert blank.status_code == 422
 
 
 def test_trigger_execute_and_inspect_trace(client):

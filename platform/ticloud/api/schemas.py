@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..config import settings
 from ..engine import ENGINES
@@ -27,6 +27,17 @@ class JobCreate(WriteModel):
     score_threshold: float | None = Field(default=None, ge=0, le=1)
     on_low_score: str = "alert"
     scorers: dict = Field(default_factory=dict)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _single_schedule(self) -> "JobCreate":
+        if self.cron is not None and self.interval_seconds is not None:
+            raise ValueError("cron and interval_seconds are mutually exclusive")
+        return self
 
     @field_validator("on_low_score")
     @classmethod
@@ -72,6 +83,17 @@ class JobUpdate(WriteModel):
     score_threshold: float | None = Field(default=None, ge=0, le=1)
     on_low_score: str | None = None
     scorers: dict | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip_name(cls, v: str | None) -> str | None:
+        return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _single_schedule(self) -> "JobUpdate":
+        if self.cron is not None and self.interval_seconds is not None:
+            raise ValueError("cron and interval_seconds are mutually exclusive")
+        return self
 
     @field_validator("on_low_score")
     @classmethod

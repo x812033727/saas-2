@@ -40,6 +40,15 @@ def test_from_template_missing_required_payload_422(client):
     assert "repo_url" in str(r.json()["detail"])
 
 
+def test_from_template_rejects_blank_required_payload(client):
+    r = client.post(
+        "/jobs/from-template/nightly-repo-patrol",
+        json={"name": "p", "payload": {"repo_url": "   "}},
+    )
+    assert r.status_code == 422
+    assert "repo_url" in str(r.json()["detail"])
+
+
 def test_offline_template_needs_no_payload(session, client):
     r = client.post("/jobs/from-template/demo-workshop", json={"name": "demo"})
     assert r.status_code == 201
@@ -73,3 +82,4 @@ def test_build_job_fields_unit():
     assert fields["payload"]["brief"]  # merged over skeleton
     assert templates.missing_required(tpl, fields["payload"]) == []
     assert templates.missing_required(tpl, {"repo_url": ""}) == ["repo_url"]
+    assert templates.missing_required(tpl, {"repo_url": "   "}) == ["repo_url"]
