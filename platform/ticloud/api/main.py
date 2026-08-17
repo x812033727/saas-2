@@ -265,6 +265,13 @@ def get_job(
 _SCHEDULE_FIELDS = {"cron", "interval_seconds"}
 
 
+def _reject_dual_schedule(job: Job, changes: dict) -> None:
+    cron = changes.get("cron", job.cron)
+    interval_seconds = changes.get("interval_seconds", job.interval_seconds)
+    if cron is not None and interval_seconds is not None:
+        raise HTTPException(422, "cron and interval_seconds are mutually exclusive")
+
+
 @app.patch("/jobs/{job_id}", response_model=JobOut)
 def update_job(
     job_id: str,
@@ -285,6 +292,7 @@ def update_job(
         )
         if clash is not None:
             raise HTTPException(409, f"job named {changes['name']!r} already exists")
+    _reject_dual_schedule(job, changes)
     for field, value in changes.items():
         setattr(job, field, value)
     if _SCHEDULE_FIELDS & changes.keys():
