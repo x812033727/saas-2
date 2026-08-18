@@ -93,6 +93,16 @@ def test_ui_exposes_rerun_control(client):
     assert "`#/runs/${run.id}`" in app_js
 
 
+def test_ui_exposes_run_cancel_control(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert 'data-runact="cancel"' in app_js
+    assert 'run.cancel_requested ? "disabled" : ""' in app_js
+    assert "`/runs/${runBtn.dataset.id}/${runBtn.dataset.runact}`" in app_js
+    assert "button:disabled" in style_css
+
+
 def test_ui_exposes_alert_filters_and_bulk_ack(client):
     index = client.get("/ui/").text
     app_js = client.get("/ui/app.js").text
@@ -117,6 +127,18 @@ def test_ui_exposes_job_settings_editor(client):
     assert "`/jobs/${id}`" in app_js
     assert 'name="approval_required"' in app_js
     assert 'name="webhook_url"' in app_js
+
+
+def test_ui_exposes_template_job_creation(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert 'api("/templates").catch(() => [])' in app_js
+    assert 'class="templatejob"' in app_js
+    assert 'name="payload_${esc(key)}"' in app_js
+    assert "`/jobs/from-template/${encodeURIComponent(form.dataset.template)}`" in app_js
+    assert 'location.hash = `#/jobs/${job.id}`' in app_js
+    assert ".template-list" in style_css
 
 
 def test_ui_exposes_manual_lesson_controls(client):
@@ -154,6 +176,19 @@ def test_ui_exposes_job_scoped_failure_mode_controls(client):
     assert 'data-promote="${esc(m.signature)}" data-job="${esc(job.id)}"' in app_js
     assert "body.job_id = promoteBtn.dataset.job" in app_js
     assert "Regression eval cases" in app_js
+
+
+def test_ui_exposes_manual_eval_case_creation(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert 'api("/jobs").catch(() => [])' in app_js
+    assert 'class="evalcase"' in app_js
+    assert 'name="payload"' in app_js
+    assert 'payload = JSON.parse(String(f.get("payload") || "{}").trim() || "{}")' in app_js
+    assert 'await api("/eval-cases", { method: "POST", body: JSON.stringify(body) })' in app_js
+    assert "if (jobId) body.job_id = jobId" in app_js
+    assert "form.evalcase" in style_css
 
 
 def test_overview_includes_last_run(client):

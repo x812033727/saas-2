@@ -158,11 +158,19 @@ button.primary {
   color: #fff;
 }
 button.primary:hover { opacity: 0.9; }
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+button:disabled:hover {
+  border-color: var(--border);
+  color: var(--ink);
+}
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
 /* Compact edit forms */
-form.newjob, form.jobsettings, form.lessonform { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-form.newjob label, form.jobsettings label, form.lessonform label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+form.newjob, form.jobsettings, form.lessonform, form.templatejob, form.evalcase { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+form.newjob label, form.jobsettings label, form.lessonform label, form.templatejob label, form.evalcase label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 form.newjob label.checkrow, form.jobsettings label.checkrow {
   flex-direction: row;
   align-items: center;
@@ -171,7 +179,7 @@ form.newjob label.checkrow, form.jobsettings label.checkrow {
   color: var(--ink-2);
 }
 form.newjob label.checkrow input, form.jobsettings label.checkrow input { width: auto; }
-form.newjob input, form.newjob select, form.jobsettings input, form.jobsettings select, form.lessonform input, form.lessonform textarea {
+form.newjob input, form.newjob select, form.jobsettings input, form.jobsettings select, form.lessonform input, form.lessonform textarea, form.templatejob input, form.evalcase input, form.evalcase select, form.evalcase textarea {
   font: inherit;
   font-size: 14px;
   padding: 5px 8px;
@@ -180,15 +188,32 @@ form.newjob input, form.newjob select, form.jobsettings input, form.jobsettings 
   background: var(--surface);
   color: var(--ink);
 }
-form.lessonform textarea { resize: vertical; min-height: 76px; }
+form.lessonform textarea, form.evalcase textarea { resize: vertical; min-height: 76px; }
+form.evalcase label.wide { grid-column: 1 / -1; }
 form.newjob label.checkrow input, form.jobsettings label.checkrow input {
   width: auto;
   padding: 0;
   border-radius: 3px;
 }
-form.newjob .submit, form.jobsettings .submit, form.lessonform .submit { align-self: end; }
+form.newjob .submit, form.jobsettings .submit, form.lessonform .submit, form.templatejob .submit, form.evalcase .submit { align-self: end; }
 form.lessonform { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--grid); }
 details.panel summary { cursor: pointer; color: var(--series-1); font-size: 14px; margin-bottom: 8px; }
+
+.template-list { display: grid; gap: 12px; margin-bottom: 18px; }
+.template-item {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 1.5fr;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--grid);
+}
+.template-item:first-child { border-top: none; padding-top: 0; }
+.template-item strong { display: block; color: var(--ink); }
+.template-item small { display: block; margin-top: 2px; color: var(--muted); }
+.template-item p { margin: 6px 0 0; color: var(--ink-2); font-size: 13px; }
+@media (max-width: 760px) {
+  .template-item { grid-template-columns: 1fr; }
+}
 
 /* Stat tiles */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
