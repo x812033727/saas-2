@@ -258,7 +258,14 @@ ids) instead of plain text.
 ```bash
 cd platform && python -m pytest
 python -m ticloud.eval.cli run       # eval-set regression gate
+TICLOUD_DATABASE_URL=sqlite:///./smoke.db python -m ticloud.smoke
+TICLOUD_DATABASE_URL=sqlite:///./smoke.db TICLOUD_SMOKE_BASE_URL=http://127.0.0.1:8000 python -m ticloud.smoke
 ```
+
+The smoke check requires an explicit `TICLOUD_DATABASE_URL` so it never seeds
+the default local dev database by accident. Add `TICLOUD_SMOKE_BASE_URL` after
+starting the API to also verify `/health`, `/templates`, `/overview`, and
+`/metrics` over HTTP.
 
 ## Roadmap
 

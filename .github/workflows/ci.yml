@@ -22,20 +22,19 @@ jobs:
         run: node --check platform/ticloud/web/app.js
       - name: Unit + integration tests
         run: cd platform && python -m pytest -q
-      - name: Demo seed smoke test
+      - name: Demo HTTP smoke test
         env:
           TICLOUD_DATABASE_URL: sqlite:///./ci-demo.db
+          TICLOUD_SMOKE_BASE_URL: http://127.0.0.1:8000
         run: |
-          python -m ticloud.demo
-          python -m ticloud.demo   # idempotency
-          python - <<'PY'
-          from ticloud.db import get_session
-          from ticloud.models import Alert, Job, Lesson
-          s = get_session()
-          jobs = {j.name: j for j in s.query(Job).all()}
-          assert set(jobs) == {"nightly-patrol", "dep-upgrade", "long-audit"}, set(jobs)
-          assert jobs["dep-upgrade"].paused, "quality gate should have paused dep-upgrade"
-          assert s.query(Lesson).count() > 0, "flywheel should have recorded lessons"
-          assert s.query(Alert).count() > 0, "gate should have raised alerts"
-          print("demo smoke OK")
-          PY
+          nohup python -m ticloud.api.main --host 127.0.0.1 --port 8000 > /tmp/ticloud-api.log 2>&1 &
+          api_pid=$!
+          trap "kill $api_pid 2>/dev/null || true" EXIT
+          for _ in {1..20}; do
+            if curl -sf "$TICLOUD_SMOKE_BASE_URL/health" >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -sf "$TICLOUD_SMOKE_BASE_URL/health" >/dev/null
+          python -m ticloud.smoke --base-url "$TICLOUD_SMOKE_BASE_URL"
