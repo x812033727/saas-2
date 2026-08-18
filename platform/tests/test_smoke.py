@@ -13,6 +13,31 @@ def test_launch_smoke_requires_explicit_database_url(monkeypatch):
         _require_explicit_database_url()
 
 
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "sqlite:///./ticloud.db",
+        " sqlite:///./ticloud.db ",
+        "sqlite:///ticloud.db",
+    ],
+)
+def test_launch_smoke_rejects_default_database_url_variants(monkeypatch, database_url):
+    monkeypatch.setenv("TICLOUD_DATABASE_URL", database_url)
+
+    with pytest.raises(RuntimeError, match="default ticloud.db"):
+        _require_explicit_database_url()
+
+
+def test_launch_smoke_cli_returns_failure_for_configuration_errors(monkeypatch, capsys):
+    monkeypatch.delenv("TICLOUD_DATABASE_URL", raising=False)
+
+    assert smoke.main([]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "smoke FAIL:" in captured.err
+    assert "TICLOUD_DATABASE_URL" in captured.err
+
+
 def test_launch_smoke_seeds_demo_and_checks_operational_surfaces():
     summary = run()
 

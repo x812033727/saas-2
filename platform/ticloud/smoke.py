@@ -14,11 +14,13 @@ import json
 import os
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
 DEFAULT_DATABASE_URL = "sqlite:///./ticloud.db"
+DEFAULT_DATABASE_FILENAME = "ticloud.db"
 HTTP_TIMEOUT_S = 5
 
 
@@ -35,11 +37,33 @@ def _fail(message: str) -> None:
     raise RuntimeError(message)
 
 
+def _is_default_database_url(url: str) -> bool:
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    try:
+        parsed = make_url(url)
+    except ArgumentError:
+        return False
+    if parsed.drivername.split("+", 1)[0] != "sqlite":
+        return False
+
+    database = parsed.database
+    if not database or database == ":memory:":
+        return False
+
+    path = Path(database)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    default_path = Path.cwd() / DEFAULT_DATABASE_FILENAME
+    return path.resolve(strict=False) == default_path.resolve(strict=False)
+
+
 def _require_explicit_database_url() -> str:
     url = os.environ.get("TICLOUD_DATABASE_URL", "").strip()
     if not url:
         _fail("set TICLOUD_DATABASE_URL to an isolated smoke database")
-    if url == DEFAULT_DATABASE_URL:
+    if _is_default_database_url(url):
         _fail("TICLOUD_DATABASE_URL must not point at the default ticloud.db")
     return url
 
