@@ -70,6 +70,25 @@ function scheduleText(job) {
   return "manual only";
 }
 
+function templateForm(t) {
+  const fields = (t.required_payload || []).map((key) => `
+    <label>${esc(key)} <input name="payload_${esc(key)}" required placeholder="${esc(key)}"></label>`).join("");
+  return `
+    <section class="template-item">
+      <div>
+        <strong>${esc(t.name)}</strong>
+        <small>${esc(t.engine)} · ${esc(scheduleText(t))}</small>
+        <p>${esc(t.description)}</p>
+      </div>
+      <form class="templatejob" data-template="${esc(t.id)}">
+        <label>name <input name="name" required value="${esc(t.id)}"></label>
+        ${fields}
+        <label>cron override <input name="cron" placeholder="${esc(t.cron || "")}"></label>
+        <button class="primary submit" type="submit">Create</button>
+      </form>
+    </section>`;
+}
+
 function toast(msg) {
   let el = document.querySelector(".toast");
   if (!el) { el = document.createElement("div"); el.className = "toast"; document.body.append(el); }
@@ -140,7 +159,10 @@ function jobSettingsForm(job) {
 }
 
 async function jobsView() {
-  const jobs = await api("/overview");
+  const [jobs, templates] = await Promise.all([
+    api("/overview"),
+    api("/templates").catch(() => []),
+  ]);
   const rows = jobs.map((j) => `
     <tr class="rowlink" data-href="#/jobs/${j.id}">
       <td><strong>${esc(j.name)}</strong><br><small style="color:var(--muted)">${esc(j.engine)}</small></td>
@@ -168,6 +190,10 @@ async function jobsView() {
     <details class="panel" ${jobs.length ? "" : "open"}>
       <summary>＋ New job</summary>
       <div class="card">
+        ${templates.length ? `
+          <h2>Start from template</h2>
+          <div class="template-list">${templates.map(templateForm).join("")}</div>
+          <h2>Custom job</h2>` : ""}
         <form class="newjob" id="newjob">
           <label>name <input name="name" required placeholder="nightly-patrol"></label>
           <label>engine <select name="engine"><option>offline</option><option>ti</option></select></label>
@@ -196,6 +222,29 @@ async function jobsView() {
     body.approval_required = f.get("approval_required") === "on";
     try { await api("/jobs", { method: "POST", body: JSON.stringify(body) }); toast("job created"); render(); }
     catch (e) { toast(e.message); }
+  });
+
+  document.querySelectorAll("form.templatejob").forEach((form) => {
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(form);
+      const payload = {};
+      for (const [key, value] of f.entries()) {
+        if (key.startsWith("payload_")) payload[key.slice(8)] = String(value || "").trim();
+      }
+      const body = { name: String(f.get("name") || "").trim(), payload };
+      const cron = String(f.get("cron") || "").trim();
+      if (cron) body.cron = cron;
+      try {
+        const job = await api(`/jobs/from-template/${encodeURIComponent(form.dataset.template)}`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        toast("job created");
+        location.hash = `#/jobs/${job.id}`;
+        render();
+      } catch (e) { toast(e.message); }
+    });
   });
 }
 
@@ -374,9 +423,13 @@ async function runDetailView(id) {
   const lessons = await api(`/jobs/${run.job_id}/lessons`).catch(() => []);
   const steps = run.steps.map(stepRow).join("");
   const canRerun = TERMINAL_RUN_STATUSES.has(run.status);
+  const canCancel = !canRerun && run.status !== "awaiting_approval";
   const approvalActions = run.status === "awaiting_approval" ? `
     <button class="primary" data-runact="approve" data-id="${run.id}">Approve</button>
     <button data-runact="reject" data-id="${run.id}">Reject</button>` : "";
+  const cancelAction = canCancel
+    ? `<button data-runact="cancel" data-id="${run.id}" ${run.cancel_requested ? "disabled" : ""}>${run.cancel_requested ? "Cancel requested" : "Cancel"}</button>`
+    : "";
   const rerunAction = canRerun
     ? `<button class="primary" data-runact="rerun" data-id="${run.id}">Rerun</button>`
     : "";
@@ -411,7 +464,7 @@ async function runDetailView(id) {
     ${run.error ? `<h2>Error</h2><div class="error-box">${esc(run.error)}</div>` : ""}
     <h2>Trace</h2>
     <div class="card" id="trace">${steps || '<div class="empty">no steps recorded yet</div>'}</div>
-    ${approvalActions || rerunAction ? `<div class="actions">${approvalActions}${rerunAction}</div>` : ""}`;
+    ${approvalActions || cancelAction || rerunAction ? `<div class="actions">${approvalActions}${cancelAction}${rerunAction}</div>` : ""}`;
 
   // Live trace: stream new steps over SSE while the run is in flight, so the
   // workshop grows before your eyes. Falls back to polling if SSE fails
@@ -509,8 +562,13 @@ async function alertsView(filter = "all") {
 }
 
 async function failuresView() {
-  const [modes, cases] = await Promise.all([api("/failure-modes"), api("/eval-cases")]);
+  const [modes, cases, jobs] = await Promise.all([
+    api("/failure-modes"),
+    api("/eval-cases"),
+    api("/jobs").catch(() => []),
+  ]);
   const promoted = new Set(cases.map((c) => c.source_signature).filter(Boolean));
+  const jobOptions = jobs.map((j) => `<option value="${esc(j.id)}">${esc(j.name)}</option>`).join("");
 
   const modeRows = modes.map((m) => `
     <tr>
@@ -547,12 +605,50 @@ async function failuresView() {
     </div>
     <h2>Eval cases</h2>
     <div class="sub">replayed by <code>python -m ticloud.eval.cli run</code> — wire into CI to block regressions</div>
+    <details class="panel">
+      <summary>＋ New eval case</summary>
+      <div class="card">
+        <form class="evalcase" id="evalcase">
+          <label>name <input name="name" required placeholder="checkout-regression"></label>
+          <label>engine <select name="engine"><option>offline</option><option>ti</option></select></label>
+          <label>min score <input name="min_score" type="number" step="0.05" min="0" max="1" value="0.9"></label>
+          <label>job <select name="job_id"><option value="">global</option>${jobOptions}</select></label>
+          <label class="wide">payload JSON <textarea name="payload" spellcheck="false">{}</textarea></label>
+          <button class="primary submit" type="submit">Create eval case</button>
+        </form>
+      </div>
+    </details>
     <div class="card">
       ${cases.length ? `<table>
         <thead><tr><th>Name</th><th>Engine</th><th class="num">Min score</th><th>Source</th><th></th></tr></thead>
         <tbody>${caseRows}</tbody></table>`
       : `<div class="empty">No eval cases yet — promote a failure mode above.</div>`}
     </div>`;
+
+  document.getElementById("evalcase").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    let payload = {};
+    try {
+      payload = JSON.parse(String(f.get("payload") || "{}").trim() || "{}");
+    } catch {
+      toast("payload must be valid JSON");
+      return;
+    }
+    const body = {
+      name: String(f.get("name") || "").trim(),
+      engine: f.get("engine"),
+      min_score: Number(f.get("min_score")),
+      payload,
+    };
+    const jobId = String(f.get("job_id") || "").trim();
+    if (jobId) body.job_id = jobId;
+    try {
+      await api("/eval-cases", { method: "POST", body: JSON.stringify(body) });
+      toast("eval case created");
+      render();
+    } catch (e) { toast(e.message); }
+  });
 }
 
 async function refreshAlertCount() {

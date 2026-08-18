@@ -98,6 +98,17 @@ def test_cancel_running_run_stops_it(session):
     assert session.get(Run, run.id).status == RunStatus.CANCELLED
 
 
+def test_cancel_running_run_response_exposes_pending_cancel(session, client):
+    job = create_job(client, cron=None)
+    run = client.post(f"/jobs/{job['id']}/trigger").json()
+    claimed = claim_next_run(session)
+    assert claimed is not None and claimed.id == run["id"]
+
+    body = client.post(f"/runs/{run['id']}/cancel").json()
+    assert body["status"] == "running"
+    assert body["cancel_requested"] is True
+
+
 def test_rerun_terminal_run_keeps_history_and_failure_context(client):
     job = create_job(client, cron=None, payload={"fail_at": 0}, max_retries=0)
     first = client.post(f"/jobs/{job['id']}/trigger").json()

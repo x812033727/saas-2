@@ -1,12 +1,17 @@
-from test_api import create_job
+import subprocess
+import textwrap
+from pathlib import Path
+
 import pytest
 
+from test_api import create_job
 from ticloud.config import settings
 from ticloud.models import Alert, Run, RunStatus
 from ticloud.scheduler.queue import claim_next_run
 from ticloud.scheduler.worker import execute_run
 
 ADMIN = {"Authorization": "Bearer admin-secret"}
+PLATFORM_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -158,3 +163,167 @@ def test_qa_alert_filter_ui_has_unknown_route_and_acked_tab_guards(client):
     assert 'href="#/alerts/open"' in app_js
     assert 'href="#/alerts/acked"' in app_js
     assert "flex-wrap: wrap;" in style_css
+
+
+def test_qa_running_cancel_flag_survives_detail_and_list_responses(session, client):
+    job = create_job(client, cron=None)
+    run = client.post(f"/jobs/{job['id']}/trigger").json()
+    assert run["status"] == "queued"
+    assert run["cancel_requested"] is False
+    assert "approval_state" in run
+
+    claimed = claim_next_run(session)
+    assert claimed is not None and claimed.id == run["id"]
+
+    before = client.get(f"/runs/{run['id']}").json()
+    assert before["status"] == "running"
+    assert before["cancel_requested"] is False
+
+    cancelled = client.post(f"/runs/{run['id']}/cancel").json()
+    assert cancelled["status"] == "running"
+    assert cancelled["cancel_requested"] is True
+    assert cancelled["finished_at"] is None
+
+    detail = client.get(f"/runs/{run['id']}").json()
+    listed = client.get(f"/jobs/{job['id']}/runs").json()
+    assert detail["cancel_requested"] is True
+    assert len(listed) == 1
+    assert listed[0]["id"] == run["id"]
+    assert listed[0]["cancel_requested"] is True
+
+
+def test_qa_template_form_submit_trims_payload_and_omits_blank_cron():
+    script = r"""
+    const assert = require("assert");
+    const fs = require("fs");
+    const vm = require("vm");
+
+    const calls = [];
+    const templateForms = [{
+      dataset: { template: "qa template/one" },
+      values: {
+        name: "  patrol from template  ",
+        payload_repo_url: "  https://example.test/repo  ",
+        cron: " \n\t ",
+      },
+      handlers: {},
+      addEventListener(type, handler) { this.handlers[type] = handler; },
+    }];
+    const newJobForm = { addEventListener() {} };
+    const appEl = {
+      innerHTML: "",
+      addEventListener() {},
+    };
+    const alertCount = {};
+    const classList = { add() {}, remove() {} };
+
+    class FakeFormData {
+      constructor(form) { this.form = form; }
+      get(key) { return this.form.values[key]; }
+      entries() { return Object.entries(this.form.values); }
+    }
+
+    function response(status, body) {
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: String(status),
+        json: async () => body,
+      };
+    }
+
+    const context = {
+      console,
+      Date,
+      JSON,
+      Math,
+      Number,
+      String,
+      Set,
+      Promise,
+      encodeURIComponent,
+      clearTimeout() {},
+      setTimeout() { return 1; },
+      localStorage: { getItem() { return null; }, setItem() {} },
+      prompt() { return ""; },
+      location: { hash: "#/jobs" },
+      window: { addEventListener() {}, EventSource: undefined },
+      FormData: FakeFormData,
+      document: {
+        hidden: false,
+        activeElement: null,
+        body: { append() {} },
+        addEventListener() {},
+        createElement() { return { className: "", textContent: "", classList }; },
+        querySelector(selector) { return selector === ".toast" ? null : null; },
+        querySelectorAll(selector) {
+          return selector === "form.templatejob" ? templateForms : [];
+        },
+        getElementById(id) {
+          if (id === "app") return appEl;
+          if (id === "alert-count") return alertCount;
+          if (id === "newjob") return newJobForm;
+          return null;
+        },
+      },
+      fetch: async (path, opts = {}) => {
+        calls.push({ path, opts });
+        if (path === "/alerts/summary") return response(200, { unacknowledged: 0 });
+        if (path === "/overview") return response(200, []);
+        if (path === "/templates") {
+          return response(200, [{
+            id: "qa template/one",
+            name: "QA Template",
+            engine: "ti",
+            cron: "0 2 * * *",
+            required_payload: ["repo_url"],
+            description: "exercise the real submit handler",
+          }]);
+        }
+        if (path === "/jobs/from-template/qa%20template%2Fone") {
+          return response(201, { id: "created-job" });
+        }
+        return response(404, { detail: `unexpected ${path}` });
+      },
+    };
+    context.globalThis = context;
+
+    (async () => {
+      const code = fs.readFileSync("ticloud/web/app.js", "utf8");
+      vm.runInNewContext(code, context, { filename: "app.js" });
+      await new Promise((resolve) => setImmediate(resolve));
+      await Promise.resolve();
+
+      assert.strictEqual(typeof templateForms[0].handlers.submit, "function");
+      await templateForms[0].handlers.submit({
+        preventDefault() {},
+        target: templateForms[0],
+      });
+
+      const post = calls.find((call) => String(call.path).startsWith("/jobs/from-template/"));
+      assert(post, "template submit did not POST");
+      assert.strictEqual(post.path, "/jobs/from-template/qa%20template%2Fone");
+      const body = JSON.parse(post.opts.body);
+      assert.deepStrictEqual(body, {
+        name: "patrol from template",
+        payload: { repo_url: "https://example.test/repo" },
+      });
+      assert.strictEqual(context.location.hash, "#/jobs/created-job");
+      console.log("QA_TEMPLATE_FORM_OK", JSON.stringify(body));
+    })().catch((err) => {
+      console.error(err && err.stack ? err.stack : err);
+      process.exit(1);
+    });
+    """
+
+    result = subprocess.run(
+        ["node", "-e", textwrap.dedent(script)],
+        cwd=PLATFORM_ROOT,
+        text=True,
+        capture_output=True,
+        timeout=20,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "QA_TEMPLATE_FORM_OK" in result.stdout

@@ -176,6 +176,8 @@ class RunOut(BaseModel):
     job_id: str
     status: str
     attempt: int
+    cancel_requested: bool
+    approval_state: str | None
     scheduled_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
