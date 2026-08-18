@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ def test_launch_smoke_requires_explicit_database_url(monkeypatch):
         "sqlite:///./ticloud.db",
         " sqlite:///./ticloud.db ",
         "sqlite:///ticloud.db",
+        f"sqlite:///{Path.cwd() / 'ticloud.db'}",
     ],
 )
 def test_launch_smoke_rejects_default_database_url_variants(monkeypatch, database_url):
