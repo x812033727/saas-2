@@ -646,11 +646,11 @@ def create_eval_case(
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> EvalCase:
-    if tenant is not None:
+    if tenant is not None and body.job_id is None:
         # Hosted mode: cases must hang off one of the tenant's jobs — a
         # global (job-less) case would leak into every tenant's eval runs.
-        if body.job_id is None:
-            raise HTTPException(422, "job_id is required in hosted mode")
+        raise HTTPException(422, "job_id is required in hosted mode")
+    if body.job_id is not None:
         _get_job(session, body.job_id, tenant)
     if _eval_case_name_exists(session, body.name, tenant):
         raise HTTPException(409, f"eval case named {body.name!r} already exists")

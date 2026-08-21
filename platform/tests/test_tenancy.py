@@ -62,6 +62,35 @@ def test_tenant_and_key_lifecycle(client, admin_mode):
     assert dup.status_code == 409
 
 
+def test_admin_names_are_stripped_and_blank_rejected(client, admin_mode):
+    tenant = client.post(
+        "/admin/tenants", json={"name": "  acme  "}, headers=ADMIN
+    )
+    assert tenant.status_code == 201, tenant.text
+    tenant_body = tenant.json()
+    assert tenant_body["name"] == "acme"
+    duplicate = client.post("/admin/tenants", json={"name": "acme"}, headers=ADMIN)
+    blank = client.post("/admin/tenants", json={"name": "   "}, headers=ADMIN)
+    assert duplicate.status_code == 409
+    assert blank.status_code == 422
+
+    key = client.post(
+        f"/admin/tenants/{tenant_body['id']}/keys",
+        json={"name": "  primary  "},
+        headers=ADMIN,
+    )
+    assert key.status_code == 201, key.text
+    assert key.json()["name"] == "primary"
+    assert (
+        client.post(
+            f"/admin/tenants/{tenant_body['id']}/keys",
+            json={"name": "   "},
+            headers=ADMIN,
+        ).status_code
+        == 422
+    )
+
+
 # --- single-tenant ("off") mode stays open ----------------------------------
 
 
