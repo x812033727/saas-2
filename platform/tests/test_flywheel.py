@@ -198,6 +198,20 @@ def test_eval_case_can_be_disabled_via_api(client, session):
     assert session.scalars(select(Job).where(Job.name == "eval:off-switch")).first() is not None
 
 
+def test_eval_case_rejects_unknown_source_job(client):
+    resp = client.post("/eval-cases", json={"name": "orphan", "job_id": "missing"})
+    assert resp.status_code == 404
+
+
+def test_eval_case_strips_and_rejects_blank_name(client):
+    created = client.post("/eval-cases", json={"name": "  smoke  ", "payload": {}})
+    assert created.status_code == 201, created.text
+    assert created.json()["name"] == "smoke"
+
+    assert client.post("/eval-cases", json={"name": "smoke"}).status_code == 409
+    assert client.post("/eval-cases", json={"name": "   "}).status_code == 422
+
+
 def test_lessons_api(client):
     from test_api import create_job
 

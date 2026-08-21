@@ -270,6 +270,11 @@ class EvalCaseCreate(WriteModel):
     min_score: float = Field(default=0.9, ge=0, le=1)
     job_id: str | None = None
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        return v.strip() if isinstance(v, str) else v
+
     @field_validator("engine")
     @classmethod
     def _known_engine(cls, v: str) -> str:
@@ -319,6 +324,11 @@ class AlertSummary(BaseModel):
 class TenantCreate(WriteModel):
     name: str = Field(min_length=1, max_length=200)
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        return v.strip() if isinstance(v, str) else v
+
 
 class TenantOut(BaseModel):
     id: str
@@ -356,6 +366,11 @@ class TenantPlan(WriteModel):
 
 class ApiKeyCreate(WriteModel):
     name: str = Field(default="default", min_length=1, max_length=200)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        return v.strip() if isinstance(v, str) else v
 
 
 class ApiKeyOut(BaseModel):
