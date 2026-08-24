@@ -8,7 +8,7 @@ from test_worker import run_job_once
 
 
 def test_api_rejects_scorers_container_that_is_not_object(client):
-    for index, bad_scorers in enumerate(([], "enabled", 1, True)):
+    for index, bad_scorers in enumerate(([], "enabled", 1, 0, True, False)):
         resp = client.post(
             "/jobs",
             json={"name": f"bad-scorers-{index}", "scorers": bad_scorers},
@@ -24,14 +24,19 @@ def test_update_rejects_bad_scorers_without_mutating_existing_config(client):
         scorers={"completion": {"enabled": True}},
     )
 
-    resp = client.patch(f"/jobs/{job['id']}", json={"scorers": []})
+    for bad_scorers in ([], "enabled", 1, 0, True, False):
+        resp = client.patch(f"/jobs/{job['id']}", json={"scorers": bad_scorers})
 
-    assert resp.status_code == 422, resp.text
-    persisted = client.get(f"/jobs/{job['id']}").json()
-    assert persisted["scorers"] == {"completion": {"enabled": True}}
+        assert resp.status_code == 422, resp.text
+        persisted = client.get(f"/jobs/{job['id']}").json()
+        assert persisted["scorers"] == {"completion": {"enabled": True}}
 
 
-@pytest.mark.parametrize("bad_scorers", [[], ""], ids=["empty-list", "empty-string"])
+@pytest.mark.parametrize(
+    "bad_scorers",
+    [[], "", 0, False, True, "enabled"],
+    ids=["empty-list", "empty-string", "zero", "false", "true", "string"],
+)
 def test_worker_fails_closed_for_falsey_malformed_scorers_from_db(session, bad_scorers):
     run = run_job_once(
         session,
