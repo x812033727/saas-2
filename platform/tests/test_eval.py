@@ -130,6 +130,18 @@ def test_malformed_scorer_config_fails_closed(session):
     assert bad.detail["error"] == "scorer config must be an object"
 
 
+def test_unknown_scorer_config_fails_closed(session):
+    run = run_job_once(session)
+
+    overall, results = score_run(run, session, {"unregistered": False})
+
+    assert overall == 0.0
+    assert results[0].scorer == "unregistered"
+    assert results[0].passed is False
+    assert results[0].required is True
+    assert results[0].detail["error"] == "unknown scorer"
+
+
 def test_malformed_scorers_config_from_db_fails_closed(session):
     run = run_job_once(
         session,

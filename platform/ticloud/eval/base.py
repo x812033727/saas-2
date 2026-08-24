@@ -57,6 +57,18 @@ def score_run(run: Run, session: Session, config: dict | None = None) -> tuple[f
                 required=True,
             )
         ]
+    unknown_scorers = sorted(set(config) - set(SCORERS))
+    if unknown_scorers:
+        return 0.0, [
+            ScoreResult(
+                scorer=name,
+                score=0.0,
+                passed=False,
+                detail={"error": "unknown scorer"},
+                required=True,
+            )
+            for name in unknown_scorers
+        ]
     results: list[ScoreResult] = []
     for name, fn in SCORERS.items():
         scorer_cfg = config.get(name, {})
