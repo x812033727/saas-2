@@ -45,10 +45,32 @@ def score_run(run: Run, session: Session, config: dict | None = None) -> tuple[f
     A scorer crashing is recorded as a zero from that scorer, never an
     unscored run — the gate must fail closed, not open.
     """
-    config = config or {}
+    if config is None:
+        config = {}
+    if not isinstance(config, dict):
+        return 0.0, [
+            ScoreResult(
+                scorer="scorers",
+                score=0.0,
+                passed=False,
+                detail={"error": "scorers config must be an object"},
+                required=True,
+            )
+        ]
     results: list[ScoreResult] = []
     for name, fn in SCORERS.items():
         scorer_cfg = config.get(name, {})
+        if not isinstance(scorer_cfg, dict):
+            results.append(
+                ScoreResult(
+                    scorer=name,
+                    score=0.0,
+                    passed=False,
+                    detail={"error": "scorer config must be an object"},
+                    required=True,
+                )
+            )
+            continue
         if not scorer_cfg.get("enabled", True):
             continue
         try:

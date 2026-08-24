@@ -118,6 +118,38 @@ def test_judge_skipped_without_api_key(session, monkeypatch):
     assert run.score is not None  # rule scorers still produced a baseline
 
 
+def test_malformed_scorer_config_fails_closed(session):
+    run = run_job_once(session)
+
+    overall, results = score_run(run, session, {"completion": "enabled"})
+    bad = next(s for s in results if s.scorer == "completion")
+
+    assert overall == 0.0
+    assert bad.passed is False
+    assert bad.required is True
+    assert bad.detail["error"] == "scorer config must be an object"
+
+
+def test_malformed_scorers_config_from_db_fails_closed(session):
+    run = run_job_once(
+        session,
+        scorers=["not-an-object"],
+        score_threshold=0.9,
+        on_low_score="pause",
+    )
+
+    session.expire_all()
+    job = session.get(Job, run.job_id)
+    bad = next(s for s in run.scores if s.scorer == "scorers")
+    kinds = {a.kind for a in session.scalars(select(Alert)).all()}
+
+    assert run.score == 0.0
+    assert bad.passed is False
+    assert bad.detail["error"] == "scorers config must be an object"
+    assert job.paused is True
+    assert {"low_score", "auto_paused"} <= kinds
+
+
 def test_judge_uses_beta_parse_when_messages_parse_missing(session, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     seen = {}

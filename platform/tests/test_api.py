@@ -46,6 +46,15 @@ def test_create_job_rejects_unknown_engine(client):
     assert resp.status_code == 422
 
 
+def test_create_job_rejects_malformed_scorer_config(client):
+    resp = client.post(
+        "/jobs",
+        json={"name": "x", "scorers": {"judge": "enabled"}},
+    )
+    assert resp.status_code == 422
+    assert "scorers.judge" in resp.text
+
+
 def test_duplicate_name_conflicts(client):
     create_job(client)
     resp = client.post("/jobs", json={"name": "nightly-patrol"})
@@ -88,6 +97,33 @@ def test_update_job_strips_and_rejects_blank_name(client):
 
     blank = client.patch(f"/jobs/{job['id']}", json={"name": "   "})
     assert blank.status_code == 422
+
+
+def test_update_job_rejects_null_required_fields(client):
+    job = create_job(client)
+    required_fields = [
+        "name",
+        "payload",
+        "timeout_s",
+        "budget_usd",
+        "max_retries",
+        "retry_backoff_s",
+        "approval_required",
+        "on_low_score",
+        "scorers",
+    ]
+
+    for field in required_fields:
+        resp = client.patch(f"/jobs/{job['id']}", json={field: None})
+        assert resp.status_code == 422, (field, resp.text)
+        assert f"{field} cannot be null" in resp.text
+
+
+def test_update_job_rejects_malformed_scorer_config(client):
+    job = create_job(client)
+    resp = client.patch(f"/jobs/{job['id']}", json={"scorers": {"judge": "enabled"}})
+    assert resp.status_code == 422
+    assert "scorers.judge" in resp.text
 
 
 def test_trigger_execute_and_inspect_trace(client):
