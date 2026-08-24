@@ -244,7 +244,8 @@ def _score_and_gate(session, run: Run) -> None:
     """
     job = run.job
     try:
-        overall, results = score_run(run, session, job.scorers or {})
+        scorer_config = job.scorers if job.scorers is not None else {}
+        overall, results = score_run(run, session, scorer_config)
     except Exception:  # noqa: BLE001
         log.exception("scoring crashed for run %s", run.id)
         return

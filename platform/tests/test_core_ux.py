@@ -191,4 +191,10 @@ def test_runs_keyset_pagination(session, client):
 
 def test_bad_cursor_422(session, client):
     job = make_job(session)
-    assert client.get(f"/jobs/{job.id}/runs", params={"cursor": "garbage"}).status_code == 422
+    bad_cursors = [
+        "garbage",
+        "2020-01-01T00:00:00+00:00|",
+        "2020-01-01T00:00:00+00:00|   ",
+    ]
+    for cursor in bad_cursors:
+        assert client.get(f"/jobs/{job.id}/runs", params={"cursor": cursor}).status_code == 422

@@ -357,8 +357,10 @@ def _keyset_before(ts_col, id_col, cursor: str | None):
     item's "<ts_iso>|<id>"; returns rows strictly older. Bad cursor → 422."""
     if not cursor:
         return None
+    ts_str, sep, cid = cursor.rpartition("|")
+    if not sep or not ts_str or not cid.strip():
+        raise HTTPException(422, "invalid cursor")
     try:
-        ts_str, _, cid = cursor.rpartition("|")
         ts = datetime.fromisoformat(ts_str)
     except ValueError:
         raise HTTPException(422, "invalid cursor")

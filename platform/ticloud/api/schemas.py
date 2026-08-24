@@ -8,6 +8,30 @@ from ..scheduler.cron import validate_cron
 from ..validation import validate_webhook_url
 
 
+_NON_NULL_JOB_UPDATE_FIELDS = {
+    "name",
+    "payload",
+    "timeout_s",
+    "budget_usd",
+    "max_retries",
+    "retry_backoff_s",
+    "approval_required",
+    "on_low_score",
+    "scorers",
+}
+
+
+def _validate_scorers_config(value: dict | None) -> dict | None:
+    if value is None:
+        return None
+    for name, cfg in value.items():
+        if not isinstance(name, str):
+            raise ValueError("scorer names must be strings")
+        if not isinstance(cfg, dict):
+            raise ValueError(f"scorers.{name} must be an object")
+    return value
+
+
 class WriteModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -50,6 +74,11 @@ class JobCreate(WriteModel):
     @classmethod
     def _valid_webhook_url(cls, v: str | None) -> str | None:
         return validate_webhook_url(v)
+
+    @field_validator("scorers")
+    @classmethod
+    def _valid_scorers(cls, v: dict) -> dict:
+        return _validate_scorers_config(v) or {}
 
     @field_validator("cron")
     @classmethod
@@ -95,6 +124,13 @@ class JobUpdate(WriteModel):
             raise ValueError("cron and interval_seconds are mutually exclusive")
         return self
 
+    @model_validator(mode="after")
+    def _reject_null_required_fields(self) -> "JobUpdate":
+        for field in _NON_NULL_JOB_UPDATE_FIELDS & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
+
     @field_validator("on_low_score")
     @classmethod
     def _valid_action(cls, v: str | None) -> str | None:
@@ -106,6 +142,11 @@ class JobUpdate(WriteModel):
     @classmethod
     def _valid_webhook_url(cls, v: str | None) -> str | None:
         return validate_webhook_url(v)
+
+    @field_validator("scorers")
+    @classmethod
+    def _valid_scorers(cls, v: dict | None) -> dict | None:
+        return _validate_scorers_config(v)
 
     @field_validator("cron")
     @classmethod
