@@ -169,18 +169,111 @@ def _latest_run_by_job(session: Session, job_ids: list[str]) -> dict[str, Run]:
     return {r.job_id: r for r in runs}
 
 
+def _run_stat_points(session: Session, runs: list[Run]) -> list[RunStatPoint]:
+    run_ids = [r.id for r in runs]
+    step_counts = (
+        dict(
+            session.execute(
+                select(RunStep.run_id, func.count(RunStep.id))
+                .where(RunStep.run_id.in_(run_ids))
+                .group_by(RunStep.run_id)
+            ).all()
+        )
+        if run_ids
+        else {}
+    )
+    return [
+        RunStatPoint(
+            run_id=r.id,
+            status=r.status.value,
+            cost_usd=r.cost_usd,
+            duration_s=(
+                (r.finished_at - r.started_at).total_seconds()
+                if r.started_at and r.finished_at
+                else None
+            ),
+            score=r.score,
+            steps=step_counts.get(r.id, 0),
+            scheduled_at=r.scheduled_at,
+        )
+        for r in runs
+    ]
+
+
+def _recent_stats_by_job(
+    session: Session, job_ids: list[str], limit_per_job: int = 8
+) -> dict[str, list[RunStatPoint]]:
+    if not job_ids:
+        return {}
+    rn = func.row_number().over(
+        partition_by=Run.job_id,
+        order_by=(Run.scheduled_at.desc(), Run.id.desc()),
+    ).label("rn")
+    ranked = (
+        select(Run.id.label("id"), rn)
+        .where(Run.job_id.in_(job_ids))
+        .subquery()
+    )
+    runs = session.scalars(
+        select(Run)
+        .join(ranked, Run.id == ranked.c.id)
+        .where(ranked.c.rn <= limit_per_job)
+        .order_by(Run.job_id, Run.scheduled_at.desc(), Run.id.desc())
+    ).all()
+
+    grouped: dict[str, list[RunStatPoint]] = {job_id: [] for job_id in job_ids}
+    for run, point in zip(runs, _run_stat_points(session, runs)):
+        grouped.setdefault(run.job_id, []).append(point)
+    for points in grouped.values():
+        points.reverse()
+    return grouped
+
+
+def _unacknowledged_alert_counts_by_job(session: Session, job_ids: list[str]) -> dict[str, int]:
+    if not job_ids:
+        return {}
+    return {
+        job_id: count
+        for job_id, count in session.execute(
+            select(Alert.job_id, func.count(Alert.id))
+            .where(Alert.job_id.in_(job_ids), Alert.acknowledged.is_(False))
+            .group_by(Alert.job_id)
+        )
+    }
+
+
+def _awaiting_approval_counts_by_job(session: Session, job_ids: list[str]) -> dict[str, int]:
+    if not job_ids:
+        return {}
+    return {
+        job_id: count
+        for job_id, count in session.execute(
+            select(Run.job_id, func.count(Run.id))
+            .where(Run.job_id.in_(job_ids), Run.status == RunStatus.AWAITING_APPROVAL)
+            .group_by(Run.job_id)
+        )
+    }
+
+
 @app.get("/overview", response_model=list[JobWithLastRun])
 def overview(
     session: Session = Depends(db), tenant: Tenant | None = Depends(current_tenant)
 ) -> list[JobWithLastRun]:
     """All jobs with their most recent run, for the dashboard home view."""
     jobs = session.scalars(_jobs_stmt(tenant)).all()
-    latest = _latest_run_by_job(session, [j.id for j in jobs])
+    job_ids = [j.id for j in jobs]
+    latest = _latest_run_by_job(session, job_ids)
+    recent_stats = _recent_stats_by_job(session, job_ids)
+    alert_counts = _unacknowledged_alert_counts_by_job(session, job_ids)
+    approval_counts = _awaiting_approval_counts_by_job(session, job_ids)
     out = []
     for job in jobs:
         item = JobWithLastRun.model_validate(job)
         last = latest.get(job.id)
         item.last_run = RunOut.model_validate(last) if last else None
+        item.recent_stats = recent_stats.get(job.id, [])
+        item.unacknowledged_alerts = alert_counts.get(job.id, 0)
+        item.awaiting_approval_runs = approval_counts.get(job.id, 0)
         out.append(item)
     return out
 
@@ -404,37 +497,23 @@ def job_stats(
         .order_by(Run.scheduled_at.desc())
         .limit(limit)
     ).all()
-    # Step counts for the whole page in one grouped query (no per-run N+1).
-    run_ids = [r.id for r in runs]
-    step_counts = dict(
-        session.execute(
-            select(RunStep.run_id, func.count(RunStep.id))
-            .where(RunStep.run_id.in_(run_ids))
-            .group_by(RunStep.run_id)
-        ).all()
-    ) if run_ids else {}
-    points = [
-        RunStatPoint(
-            run_id=r.id,
-            status=r.status.value,
-            cost_usd=r.cost_usd,
-            duration_s=(
-                (r.finished_at - r.started_at).total_seconds()
-                if r.started_at and r.finished_at
-                else None
-            ),
-            score=r.score,
-            steps=step_counts.get(r.id, 0),
-            scheduled_at=r.scheduled_at,
-        )
-        for r in runs
-    ]
-    return list(reversed(points))
+    return list(reversed(_run_stat_points(session, runs)))
+
+
+def _alerts_scope(session: Session, tenant: Tenant | None, job_id: str | None = None):
+    stmt = select(Alert)
+    if job_id is not None:
+        _get_job(session, job_id, tenant)
+        return stmt.where(Alert.job_id == job_id)
+    if tenant is not None:
+        stmt = stmt.where(Alert.job_id.in_(_tenant_job_ids(session, tenant)))
+    return stmt
 
 
 @app.get("/alerts", response_model=list[AlertOut])
 def list_alerts(
     acknowledged: bool | None = None,
+    job_id: str | None = Query(default=None, min_length=1, max_length=32),
     limit: int = Query(100, ge=1, le=500),
     cursor: str | None = None,
     session: Session = Depends(db),
@@ -442,11 +521,9 @@ def list_alerts(
 ) -> list[Alert]:
     """Newest first. Paginate with `cursor` = the last row's
     "<created_at>|<id>"."""
-    stmt = select(Alert)
+    stmt = _alerts_scope(session, tenant, job_id)
     if acknowledged is not None:
         stmt = stmt.where(Alert.acknowledged.is_(acknowledged))
-    if tenant is not None:
-        stmt = stmt.where(Alert.job_id.in_(_tenant_job_ids(session, tenant)))
     keyset = _keyset_before(Alert.created_at, Alert.id, cursor)
     if keyset is not None:
         stmt = stmt.where(keyset)
@@ -483,12 +560,11 @@ def ack_alert(
 
 @app.post("/alerts/ack-all", response_model=AlertAckSummary)
 def ack_all_alerts(
+    job_id: str | None = Query(default=None, min_length=1, max_length=32),
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> AlertAckSummary:
-    stmt = select(Alert).where(Alert.acknowledged.is_(False))
-    if tenant is not None:
-        stmt = stmt.where(Alert.job_id.in_(_tenant_job_ids(session, tenant)))
+    stmt = _alerts_scope(session, tenant, job_id).where(Alert.acknowledged.is_(False))
     alerts = session.scalars(stmt).all()
     for alert in alerts:
         alert.acknowledged = True

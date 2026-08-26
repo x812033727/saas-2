@@ -12,20 +12,30 @@ from sqlalchemy import inspect, text
 from test_scheduler import make_job
 from ticloud.billing import month_to_date_cost
 from ticloud.db import engine, init_db
-from ticloud.models import Job, Run, RunStatus
+from ticloud.models import Alert, Run, RunStatus, RunStep
 
 
-def _run(session, job_id, *, cost, started=None, scheduled=None, status=RunStatus.SUCCEEDED):
-    session.add(
-        Run(
-            job_id=job_id,
-            status=status,
-            scheduled_at=scheduled or datetime.now(timezone.utc),
-            started_at=started,
-            cost_usd=cost,
-        )
+def _run(
+    session,
+    job_id,
+    *,
+    cost,
+    started=None,
+    scheduled=None,
+    status=RunStatus.SUCCEEDED,
+    score=None,
+):
+    run = Run(
+        job_id=job_id,
+        status=status,
+        scheduled_at=scheduled or datetime.now(timezone.utc),
+        started_at=started,
+        cost_usd=cost,
+        score=score,
     )
+    session.add(run)
     session.commit()
+    return run
 
 
 # --- spend aggregation (SQL) -------------------------------------------------
@@ -75,10 +85,69 @@ def test_overview_returns_latest_run_per_job(session, client):
     assert row["last_run"]["cost_usd"] == pytest.approx(2.0)
 
 
+def test_overview_includes_recent_stats_oldest_first_and_limited(session, client):
+    job = make_job(session, name="trended")
+    base = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    for i in range(10):
+        run = _run(
+            session,
+            job.id,
+            cost=float(i),
+            score=i / 10,
+            scheduled=base.replace(day=i + 1),
+        )
+        if i == 9:
+            session.add_all(
+                [
+                    RunStep(run_id=run.id, index=0, role="pm", name="plan"),
+                    RunStep(run_id=run.id, index=1, role="qa", name="review"),
+                ]
+            )
+            session.commit()
+
+    row = next(r for r in client.get("/overview").json() if r["name"] == "trended")
+    stats = row["recent_stats"]
+
+    assert len(stats) == 8
+    assert [point["cost_usd"] for point in stats] == pytest.approx(
+        [float(i) for i in range(2, 10)]
+    )
+    assert stats[0]["scheduled_at"] <= stats[-1]["scheduled_at"]
+    assert stats[-1]["score"] == pytest.approx(0.9)
+    assert stats[-1]["steps"] == 2
+
+
 def test_overview_job_without_runs(session, client):
     make_job(session, name="empty")
     row = next(r for r in client.get("/overview").json() if r["name"] == "empty")
     assert row["last_run"] is None
+    assert row["recent_stats"] == []
+    assert row["unacknowledged_alerts"] == 0
+    assert row["awaiting_approval_runs"] == 0
+
+
+def test_overview_includes_operator_backlog_counts(session, client):
+    job = make_job(session, name="needs-action")
+    quiet = make_job(session, name="quiet")
+
+    session.add_all(
+        [
+            Alert(job_id=job.id, kind="low_score", message="open-a"),
+            Alert(job_id=job.id, kind="run_failed", message="open-b"),
+            Alert(job_id=job.id, kind="auto_paused", message="acked", acknowledged=True),
+            Alert(job_id=quiet.id, kind="low_score", message="quiet-open"),
+            Run(job_id=job.id, status=RunStatus.AWAITING_APPROVAL),
+            Run(job_id=job.id, status=RunStatus.AWAITING_APPROVAL),
+            Run(job_id=job.id, status=RunStatus.QUEUED),
+        ]
+    )
+    session.commit()
+
+    rows = {r["name"]: r for r in client.get("/overview").json()}
+    assert rows["needs-action"]["unacknowledged_alerts"] == 2
+    assert rows["needs-action"]["awaiting_approval_runs"] == 2
+    assert rows["quiet"]["unacknowledged_alerts"] == 1
+    assert rows["quiet"]["awaiting_approval_runs"] == 0
 
 
 # --- usage window bound ------------------------------------------------------

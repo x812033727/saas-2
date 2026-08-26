@@ -112,11 +112,20 @@ def test_ui_exposes_alert_filters_and_bulk_ack(client):
     assert 'api("/alerts/summary")' in app_js
     assert "summary.unacknowledged" in app_js
     assert 'href="#/alerts/open"' in app_js
-    assert 'href="#/alerts/acked"' in app_js
+    assert 'tabHref("acked")' in app_js
     assert "acknowledged=false" in app_js
     assert "acknowledged=true" in app_js
     assert "data-ack-all" in app_js
     assert ".tabs a.active" in style_css
+
+
+def test_ui_links_job_alert_counts_to_job_scoped_alerts(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert 'href="#/alerts/open/${encodeURIComponent(job.id)}"' in app_js
+    assert 'const scoped = jobId ? `&job_id=${encodeURIComponent(jobId)}` : "";' in app_js
+    assert "await alertsView(id || \"all\", subid || null)" in app_js
+    assert "`/alerts/ack-all${jobId ? `?job_id=${encodeURIComponent(jobId)}` : \"\"}`" in app_js
 
 
 def test_ui_exposes_job_settings_editor(client):
@@ -203,6 +212,29 @@ def test_overview_includes_last_run(client):
     assert overview["nightly-patrol"]["last_run"]["status"] == "succeeded"
     assert overview["nightly-patrol"]["last_run"]["cost_usd"] > 0
     assert overview["second-job"]["last_run"] is None
+
+
+def test_jobs_view_uses_overview_recent_stats(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert "miniSparkline(j.recent_stats || []" in app_js
+    assert "<th>Trend</th>" in app_js
+    assert 'class="spark mini"' in app_js
+    assert "td.trendcell" in style_css
+
+
+def test_jobs_view_uses_overview_attention_counts(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert "function attentionSummary(job)" in app_js
+    assert "job.unacknowledged_alerts" in app_js
+    assert "job.awaiting_approval_runs" in app_js
+    assert "<th>Needs action</th>" in app_js
+    assert 'class="attention" data-noclick' in app_js
+    assert ".attention-pill.alert" in style_css
+    assert ".attention-pill.approval" in style_css
 
 
 def test_job_stats_series(client):

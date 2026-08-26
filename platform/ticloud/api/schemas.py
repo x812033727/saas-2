@@ -247,10 +247,6 @@ class RunDetailOut(RunOut):
     scores: list[ScoreRecordOut]
 
 
-class JobWithLastRun(JobOut):
-    last_run: RunOut | None = None
-
-
 class RunStatPoint(BaseModel):
     """Lightweight per-run point for trend sparklines (drift view)."""
 
@@ -261,6 +257,13 @@ class RunStatPoint(BaseModel):
     score: float | None
     steps: int
     scheduled_at: datetime
+
+
+class JobWithLastRun(JobOut):
+    last_run: RunOut | None = None
+    recent_stats: list[RunStatPoint] = Field(default_factory=list)
+    unacknowledged_alerts: int = 0
+    awaiting_approval_runs: int = 0
 
 
 class LessonOut(BaseModel):

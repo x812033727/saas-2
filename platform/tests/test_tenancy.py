@@ -11,7 +11,7 @@ from sqlalchemy import inspect, text
 from test_worker import run_job_once
 from ticloud.config import settings
 from ticloud.db import engine, init_db
-from ticloud.models import Alert, Job
+from ticloud.models import Alert, Job, Run, RunStatus
 
 ADMIN = {"Authorization": "Bearer admin-secret"}
 
@@ -226,6 +226,64 @@ def test_ack_all_alerts_scoped_by_tenant(client, hosted, session):
     alerts_b = client.get("/alerts?acknowledged=false", headers=auth_b).json()
     assert len(alerts_b) == 1
     assert alerts_b[0]["job_id"] == job_b["id"]
+
+
+def test_job_scoped_alerts_are_tenant_scoped(client, hosted, session):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+    job_a = client.post("/jobs", json={"name": "a-job-alerts"}, headers=auth_a).json()
+    job_b = client.post("/jobs", json={"name": "b-job-alerts"}, headers=auth_b).json()
+    session.add_all(
+        [
+            Alert(job_id=job_a["id"], kind="low_score", message="a1"),
+            Alert(job_id=job_a["id"], kind="run_failed", message="a2"),
+            Alert(job_id=job_b["id"], kind="low_score", message="b1"),
+        ]
+    )
+    session.commit()
+
+    alerts_a = client.get(
+        "/alerts",
+        params={"job_id": job_a["id"], "acknowledged": False},
+        headers=auth_a,
+    ).json()
+    assert {a["message"] for a in alerts_a} == {"a1", "a2"}
+    assert client.get("/alerts", params={"job_id": job_a["id"]}, headers=auth_b).status_code == 404
+    assert (
+        client.post("/alerts/ack-all", params={"job_id": job_a["id"]}, headers=auth_b).status_code
+        == 404
+    )
+
+    assert client.post(
+        "/alerts/ack-all",
+        params={"job_id": job_a["id"]},
+        headers=auth_a,
+    ).json() == {"acknowledged": 2}
+    alerts_b = client.get("/alerts", params={"acknowledged": False}, headers=auth_b).json()
+    assert [a["message"] for a in alerts_b] == ["b1"]
+
+
+def test_hosted_overview_backlog_counts_are_tenant_scoped(client, hosted, session):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+    job_a = client.post("/jobs", json={"name": "a-overview"}, headers=auth_a).json()
+    job_b = client.post("/jobs", json={"name": "b-overview"}, headers=auth_b).json()
+    session.add_all(
+        [
+            Alert(job_id=job_a["id"], kind="low_score", message="a"),
+            Alert(job_id=job_a["id"], kind="run_failed", message="a-acked", acknowledged=True),
+            Alert(job_id=job_b["id"], kind="low_score", message="b"),
+            Run(job_id=job_a["id"], status=RunStatus.AWAITING_APPROVAL),
+            Run(job_id=job_b["id"], status=RunStatus.AWAITING_APPROVAL),
+        ]
+    )
+    session.commit()
+
+    overview_a = client.get("/overview", headers=auth_a).json()
+    overview_b = client.get("/overview", headers=auth_b).json()
+    fields = ("name", "unacknowledged_alerts", "awaiting_approval_runs")
+    assert [tuple(j[f] for f in fields) for j in overview_a] == [("a-overview", 1, 1)]
+    assert [tuple(j[f] for f in fields) for j in overview_b] == [("b-overview", 1, 1)]
 
 
 def test_tenants_have_independent_name_namespaces(client, hosted, session):
