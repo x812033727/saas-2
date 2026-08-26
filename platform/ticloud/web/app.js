@@ -128,7 +128,37 @@ function sparkline(points, { value, format, label, max = null, threshold = null 
     </svg>`;
 }
 
+function miniSparkline(points, { value, format, label, max = null } = {}) {
+  const pts = points.filter((p) => value(p) != null);
+  if (pts.length < 2) return `<span class="muted">—</span>`;
+  const W = 160, H = 32, PAD = 4;
+  const vals = pts.map(value);
+  const vmax = max ?? Math.max(...vals, 1e-9);
+  const x = (i) => PAD + (i * (W - 2 * PAD)) / (pts.length - 1);
+  const y = (v) => H - PAD - (Math.min(v, vmax) / vmax) * (H - 2 * PAD);
+  const path = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(value(p)).toFixed(1)}`).join(" ");
+  const dots = pts.map((p, i) => `
+    <circle class="pt" cx="${x(i).toFixed(1)}" cy="${y(value(p)).toFixed(1)}" r="2">
+      <title>${esc(p.status)} · ${format(value(p))} · ${esc(fmtTime(p.scheduled_at))}</title>
+    </circle>`).join("");
+  return `
+    <svg class="spark mini" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}, most recent ${pts.length} runs">
+      <line class="baseline" x1="${PAD}" y1="${H - PAD}" x2="${W - PAD}" y2="${H - PAD}"/>
+      <path class="line" d="${path}"/>${dots}
+    </svg>`;
+}
+
 const fmtScore = (v) => (v == null ? "—" : v.toFixed(2));
+
+function attentionSummary(job) {
+  const alerts = Number(job.unacknowledged_alerts || 0);
+  const approvals = Number(job.awaiting_approval_runs || 0);
+  if (!alerts && !approvals) return `<span class="muted">—</span>`;
+  return `<div class="attention-stack">
+    ${alerts ? `<a class="attention-pill alert" href="#/alerts/open/${encodeURIComponent(job.id)}">${alerts} alert${alerts === 1 ? "" : "s"}</a>` : ""}
+    ${approvals ? `<a class="attention-pill approval" href="#/approvals">${approvals} approval${approvals === 1 ? "" : "s"}</a>` : ""}
+  </div>`;
+}
 
 /* ---------- views ---------- */
 
@@ -169,8 +199,12 @@ async function jobsView() {
       <td>${esc(scheduleText(j))}<br><small style="color:var(--muted)">next ${relTime(j.next_run_at)}</small></td>
       <td>${j.last_run ? badge(j.last_run.status) : '<span style="color:var(--muted)">never ran</span>'}
           ${j.last_run ? `<br><small style="color:var(--muted)">${relTime(j.last_run.scheduled_at)}</small>` : ""}</td>
+      <td class="attention" data-noclick>${attentionSummary(j)}</td>
       <td class="num">${j.last_run ? fmtScore(j.last_run.score) : "—"}
           ${j.score_threshold != null ? `<br><small style="color:var(--muted)">gate ${fmtScore(j.score_threshold)}</small>` : ""}</td>
+      <td class="trendcell">${miniSparkline(j.recent_stats || [], {
+        value: (p) => p.score, format: fmtScore, label: `${j.name} score trend`, max: 1,
+      })}</td>
       <td class="num">${j.last_run ? fmtMoney(j.last_run.cost_usd) : "—"}</td>
       <td class="actions" data-noclick>
         <button data-act="trigger" data-id="${j.id}">Run now</button>
@@ -183,7 +217,7 @@ async function jobsView() {
     <div class="sub">scheduled agent workshops, guarded by budget & timeout</div>
     <div class="card">
       ${jobs.length ? `<table>
-        <thead><tr><th>Job</th><th>Schedule</th><th>Last run</th><th class="num">Score</th><th class="num">Last cost</th><th></th></tr></thead>
+        <thead><tr><th>Job</th><th>Schedule</th><th>Last run</th><th>Needs action</th><th class="num">Score</th><th>Trend</th><th class="num">Last cost</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table>`
       : `<div class="empty">No jobs yet — create your first one below.</div>`}
     </div>
@@ -514,17 +548,31 @@ async function approvalsView() {
     </div>`;
 }
 
-async function alertsView(filter = "all") {
+async function alertsView(filter = "all", jobId = null) {
   filter = ["open", "acked"].includes(filter) ? filter : "all";
+  const scoped = jobId ? `&job_id=${encodeURIComponent(jobId)}` : "";
   const filterQuery = filter === "open"
     ? "&acknowledged=false"
     : filter === "acked"
       ? "&acknowledged=true"
       : "";
+  const alertsPath = `/alerts?limit=100${filterQuery}${scoped}`;
+  const openAlertsReq = jobId
+    ? api(`/alerts?acknowledged=false&limit=1${scoped}`)
+    : api("/alerts?acknowledged=false&limit=1");
   const [alerts, openAlerts] = await Promise.all([
-    api(`/alerts?limit=100${filterQuery}`),
-    api("/alerts?acknowledged=false&limit=1"),
+    api(alertsPath),
+    openAlertsReq,
   ]);
+  const tabHref = (target) => jobId ? `#/alerts/${target}/${encodeURIComponent(jobId)}` : `#/alerts/${target}`;
+  const tabs = jobId ? `
+      <a class="${filter === "all" ? "active" : ""}" href="${tabHref("all")}">All</a>
+      <a class="${filter === "open" ? "active" : ""}" href="${tabHref("open")}">Open</a>
+      <a class="${filter === "acked" ? "active" : ""}" href="${tabHref("acked")}">Acked</a>`
+    : `
+      <a class="${filter === "all" ? "active" : ""}" href="#/alerts">All</a>
+      <a class="${filter === "open" ? "active" : ""}" href="#/alerts/open">Open</a>
+      <a class="${filter === "acked" ? "active" : ""}" href="#/alerts/acked">Acked</a>`;
   const ALERT_BADGE = {
     auto_paused: ["paused", "‖ auto-paused"],
     run_failed: ["failed", "✕ run failed"],
@@ -547,12 +595,11 @@ async function alertsView(filter = "all") {
   app.innerHTML = `
     <h1>Alerts</h1>
     <div class="sub">what the quality gate and retry-exhaustion caught while nobody was watching</div>
+    ${jobId ? `<div class="sub">filtered to job ${esc(jobId.slice(0, 8))} · <a href="#/alerts/open">show all open alerts</a></div>` : ""}
     <div class="tabs" aria-label="Alert filters">
-      <a class="${filter === "all" ? "active" : ""}" href="#/alerts">All</a>
-      <a class="${filter === "open" ? "active" : ""}" href="#/alerts/open">Open</a>
-      <a class="${filter === "acked" ? "active" : ""}" href="#/alerts/acked">Acked</a>
+      ${tabs}
     </div>
-    ${filter !== "acked" && openAlerts.length ? `<div style="margin-bottom:12px"><button data-ack-all>Ack all open</button></div>` : ""}
+    ${filter !== "acked" && openAlerts.length ? `<div style="margin-bottom:12px"><button data-ack-all="${esc(jobId || "")}">Ack all open</button></div>` : ""}
     <div class="card">
       ${alerts.length ? `<table>
         <thead><tr><th>Kind</th><th>Message</th><th>When</th><th></th></tr></thead>
@@ -713,14 +760,14 @@ function schedulePoll(ms) {
 async function render() {
   clearTimeout(pollTimer);
   const hash = location.hash || "#/jobs";
-  const [, view, id] = hash.split("/");
+  const [, view, id, subid] = hash.split("/");
   refreshAlertCount();
   try {
     if (view === "runs" && id) await runDetailView(id);
     else if (view === "usage") { await usageView(); schedulePoll(15000); }
     else if (view === "approvals") { await approvalsView(); schedulePoll(5000); }
     else if (view === "failures") { await failuresView(); schedulePoll(6000); }
-    else if (view === "alerts") { await alertsView(id || "all"); schedulePoll(5000); }
+    else if (view === "alerts") { await alertsView(id || "all", subid || null); schedulePoll(5000); }
     else if (view === "jobs" && id) { await jobDetailView(id); schedulePoll(3000); }
     else { await jobsView(); schedulePoll(3000); }
   } catch (e) {
@@ -738,7 +785,8 @@ app.addEventListener("click", (ev) => {
   }
   if (ev.target.closest("button[data-ack-all]")) {
     ev.stopPropagation();
-    act("POST", "/alerts/ack-all", render);
+    const jobId = ev.target.closest("button[data-ack-all]").dataset.ackAll;
+    act("POST", `/alerts/ack-all${jobId ? `?job_id=${encodeURIComponent(jobId)}` : ""}`, render);
     return;
   }
   const promoteBtn = ev.target.closest("button[data-promote]");

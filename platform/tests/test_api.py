@@ -167,6 +167,40 @@ def test_limit_validation_for_runs_stats_and_alerts(client):
         assert resp.status_code == expected_status, (path, limit, resp.text)
 
 
+def test_alerts_can_be_filtered_and_bulk_acked_by_job(client, session):
+    from ticloud.models import Alert
+
+    job = create_job(client, name="noisy")
+    other = create_job(client, name="quiet")
+    session.add_all(
+        [
+            Alert(job_id=job["id"], kind="low_score", message="first"),
+            Alert(job_id=job["id"], kind="run_failed", message="second"),
+            Alert(job_id=job["id"], kind="auto_paused", message="old", acknowledged=True),
+            Alert(job_id=other["id"], kind="low_score", message="other"),
+        ]
+    )
+    session.commit()
+
+    scoped = client.get(
+        "/alerts",
+        params={"job_id": job["id"], "acknowledged": False},
+    ).json()
+    assert {a["message"] for a in scoped} == {"first", "second"}
+    assert all(a["job_id"] == job["id"] for a in scoped)
+
+    assert client.get("/alerts", params={"job_id": "missing"}).status_code == 404
+    assert client.post("/alerts/ack-all", params={"job_id": job["id"]}).json() == {
+        "acknowledged": 2
+    }
+    assert client.get(
+        "/alerts",
+        params={"job_id": job["id"], "acknowledged": False},
+    ).json() == []
+    remaining = client.get("/alerts", params={"acknowledged": False}).json()
+    assert [a["job_id"] for a in remaining] == [other["id"]]
+
+
 def test_missing_resources_404(client):
     assert client.get("/jobs/nope").status_code == 404
     assert client.get("/runs/nope").status_code == 404
