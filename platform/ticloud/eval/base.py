@@ -7,7 +7,9 @@ because "the agent didn't finish" can't be averaged away by a nice
 trajectory.
 """
 
+import math
 from dataclasses import dataclass, field
+from numbers import Real
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
@@ -96,6 +98,25 @@ def score_run(run: Run, session: Session, config: dict | None = None) -> tuple[f
         return 1.0, []
     if any(r.required and not r.passed for r in results):
         return 0.0, results
+    for i, result in enumerate(results):
+        weight = result.weight
+        if (
+            isinstance(weight, bool)
+            or not isinstance(weight, Real)
+            or not math.isfinite(weight)
+            or weight <= 0
+        ):
+            invalid = ScoreResult(
+                scorer=result.scorer,
+                score=0.0,
+                passed=False,
+                detail={
+                    "error": "scorer weight must be a positive finite number",
+                    "weight": repr(weight),
+                },
+                required=True,
+            )
+            return 0.0, [*results[:i], invalid, *results[i + 1:]]
     total_weight = sum(r.weight for r in results)
     overall = sum(r.score * r.weight for r in results) / total_weight
     return round(overall, 4), results
