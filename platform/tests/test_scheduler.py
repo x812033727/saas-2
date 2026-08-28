@@ -21,6 +21,19 @@ def test_cron_next_run():
     assert (nxt.hour, nxt.minute, nxt.day) == (2, 0, 17)
 
 
+def test_cron_next_run_normalizes_after_to_utc():
+    job = Job(name="j", cron="0 2 * * *")  # daily at 02:00 UTC
+
+    naive_next = compute_next_run(job, after=datetime(2026, 7, 16, 3, 0))
+    local_next = compute_next_run(
+        job,
+        after=datetime(2026, 7, 16, 11, 0, tzinfo=timezone(timedelta(hours=8))),
+    )
+
+    assert naive_next == datetime(2026, 7, 17, 2, 0, tzinfo=timezone.utc)
+    assert local_next == datetime(2026, 7, 17, 2, 0, tzinfo=timezone.utc)
+
+
 def test_interval_next_run():
     job = Job(name="j", interval_seconds=900)
     after = datetime(2026, 7, 16, tzinfo=timezone.utc)
