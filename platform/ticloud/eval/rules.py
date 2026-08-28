@@ -90,6 +90,9 @@ def cost_anomaly(run: Run, session: Session, cfg: dict) -> ScoreResult | None:
 
     median = statistics.median(baseline_costs)
     factor = cfg.get("factor", 3.0)
+    if not isinstance(factor, (int, float)) or isinstance(factor, bool) or factor <= 0:
+        raise ValueError("cost_anomaly.factor must be a positive number")
+    factor = float(factor)
     ratio = run.cost_usd / median if median else 0.0
     # 1.0 at/below the anomaly bar, then linear decay; 0 at 2x the bar.
     score = 1.0 if ratio <= factor else max(0.0, round(1 - (ratio - factor) / factor, 4))

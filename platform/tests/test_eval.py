@@ -70,6 +70,26 @@ def test_cost_anomaly_detected(session):
     assert anomaly.detail["ratio"] > 3
 
 
+def test_cost_anomaly_invalid_factor_fails_without_score_overflow(session):
+    job = make_job(session)
+    for mult in (1.0, 1.0, 1.0, 10.0):
+        job.payload = {"cost_multiplier": mult, "steps": 3}
+        session.commit()
+        enqueue_manual(session, job)
+        run = claim_next_run(session)
+        execute_run(run.id)
+        session.expire_all()
+
+    last = session.scalars(select(Run).order_by(Run.scheduled_at.desc())).first()
+    overall, results = score_run(last, session, {"cost_anomaly": {"factor": -1}})
+    anomaly = next(s for s in results if s.scorer == "cost_anomaly")
+
+    assert anomaly.score == 0.0
+    assert anomaly.passed is False
+    assert anomaly.detail["error"] == "cost_anomaly.factor must be a positive number"
+    assert 0.0 <= overall <= 1.0
+
+
 def test_gate_alerts_and_pauses(session):
     """The core Phase 2 loop: bad run -> low score -> alert -> auto-pause."""
     run = run_job_once(
