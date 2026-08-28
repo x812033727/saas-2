@@ -20,6 +20,10 @@ def _month_key(dt: datetime) -> str:
 
 
 def _month_start(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
     return datetime(dt.year, dt.month, 1, tzinfo=timezone.utc)
 
 
