@@ -2,6 +2,7 @@
 
 const app = document.getElementById("app");
 let pollTimer = null;
+let lastEvalSummary = null;
 
 /* ---------- helpers ---------- */
 
@@ -640,6 +641,24 @@ async function failuresView() {
         <button data-delcase="${c.id}">Delete</button>
       </td>
     </tr>`).join("");
+  const evalResult = lastEvalSummary ? `
+    <div class="eval-result card">
+      <div class="eval-result-head">
+        <strong>${lastEvalSummary.failed ? "Eval gate failed" : "Eval gate passed"}</strong>
+        <span>${lastEvalSummary.passed}/${lastEvalSummary.total} passed</span>
+      </div>
+      ${lastEvalSummary.cases.length ? `<table>
+        <thead><tr><th>Case</th><th>Status</th><th class="num">Score</th><th class="num">Min</th><th>Result</th></tr></thead>
+        <tbody>${lastEvalSummary.cases.map((c) => `
+          <tr>
+            <td><strong>${esc(c.name)}</strong></td>
+            <td><a href="#/runs/${esc(c.run_id)}">${badge(c.run_status)}</a></td>
+            <td class="num">${fmtScore(c.score)}</td>
+            <td class="num">${fmtScore(c.min_score)}</td>
+            <td>${c.passed ? '<span style="color:var(--good-text)">PASS</span>' : '<span style="color:var(--critical)">FAIL</span>'}</td>
+          </tr>`).join("")}</tbody></table>`
+        : `<div class="empty">No enabled eval cases to run.</div>`}
+    </div>` : "";
 
   app.innerHTML = `
     <h1>Failure modes</h1>
@@ -652,6 +671,8 @@ async function failuresView() {
     </div>
     <h2>Eval cases</h2>
     <div class="sub">replayed by <code>python -m ticloud.eval.cli run</code> — wire into CI to block regressions</div>
+    <div class="eval-toolbar"><button class="primary" data-runevals ${cases.length ? "" : "disabled"}>Run evals</button></div>
+    ${evalResult}
     <details class="panel">
       <summary>＋ New eval case</summary>
       <div class="card">
@@ -692,6 +713,7 @@ async function failuresView() {
     if (jobId) body.job_id = jobId;
     try {
       await api("/eval-cases", { method: "POST", body: JSON.stringify(body) });
+      lastEvalSummary = null;
       toast("eval case created");
       render();
     } catch (e) { toast(e.message); }
@@ -797,12 +819,27 @@ app.addEventListener("click", (ev) => {
     api("/failure-modes/promote", {
       method: "POST",
       body: JSON.stringify(body),
-    }).then(() => { toast("eval case created"); render(); }).catch((e) => toast(e.message));
+    }).then(() => { lastEvalSummary = null; toast("eval case created"); render(); }).catch((e) => toast(e.message));
+    return;
+  }
+  const runEvalsBtn = ev.target.closest("button[data-runevals]");
+  if (runEvalsBtn) {
+    ev.stopPropagation();
+    runEvalsBtn.disabled = true;
+    runEvalsBtn.textContent = "Running...";
+    api("/eval-cases/run", { method: "POST", body: "{}" })
+      .then((summary) => {
+        lastEvalSummary = summary;
+        toast(summary.failed ? "eval gate failed" : "eval gate passed");
+        render();
+      })
+      .catch((e) => { toast(e.message); render(); });
     return;
   }
   const delBtn = ev.target.closest("button[data-delcase]");
   if (delBtn) {
     ev.stopPropagation();
+    lastEvalSummary = null;
     act("DELETE", `/eval-cases/${delBtn.dataset.delcase}`, render);
     return;
   }
@@ -812,7 +849,7 @@ app.addEventListener("click", (ev) => {
     api(`/eval-cases/${toggleBtn.dataset.togglecase}`, {
       method: "PATCH",
       body: JSON.stringify({ enabled: toggleBtn.dataset.enabled === "true" }),
-    }).then(() => { toast("eval case updated"); render(); }).catch((e) => toast(e.message));
+    }).then(() => { lastEvalSummary = null; toast("eval case updated"); render(); }).catch((e) => toast(e.message));
     return;
   }
   const lessonBtn = ev.target.closest("button[data-dellesson]");

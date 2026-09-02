@@ -345,6 +345,31 @@ class EvalCaseUpdate(WriteModel):
     enabled: bool | None = None
 
 
+class EvalRunRequest(WriteModel):
+    job_id: str | None = Field(default=None, min_length=1, max_length=32)
+    min_score: float | None = Field(default=None, ge=0, le=1)
+
+
+class EvalRunCaseOut(BaseModel):
+    id: str
+    name: str
+    job_id: str | None
+    engine: str
+    run_id: str
+    run_status: str
+    score: float
+    min_score: float
+    passed: bool
+    error: str | None
+
+
+class EvalRunSummary(BaseModel):
+    total: int
+    passed: int
+    failed: int
+    cases: list[EvalRunCaseOut]
+
+
 class AlertOut(BaseModel):
     id: str
     job_id: str

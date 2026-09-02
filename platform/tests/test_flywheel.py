@@ -1,6 +1,8 @@
+import json
+
 from sqlalchemy import select
 
-from ticloud.eval.cli import run_cases
+from ticloud.eval.cli import list_cases, run_cases
 from ticloud.eval.failures import cluster_failures, error_signature, normalize_error
 from ticloud.models import EvalCase, Lesson, Run, RunStatus
 from ticloud.scheduler.queue import claim_next_run, enqueue_manual
@@ -145,6 +147,115 @@ def test_eval_cli_fails_on_regression(session):
     session.add(EvalCase(name="still-broken", engine="offline", payload={"fail_at": 1}, min_score=0.9))
     session.commit()
     assert run_cases() == 1
+
+
+def test_eval_cli_run_json_output(session, capsys):
+    session.add(EvalCase(name="smoke", engine="offline", payload={}, min_score=0.9))
+    session.add(
+        EvalCase(name="still-broken", engine="offline", payload={"fail_at": 1}, min_score=0.9)
+    )
+    session.commit()
+
+    assert run_cases(json_output=True) == 1
+    body = json.loads(capsys.readouterr().out)
+
+    assert body["total"] == 2
+    assert body["passed"] == 1
+    assert body["failed"] == 1
+    by_name = {case["name"]: case for case in body["cases"]}
+    assert by_name["smoke"]["passed"] is True
+    assert by_name["smoke"]["run_status"] == "succeeded"
+    assert by_name["still-broken"]["passed"] is False
+    assert by_name["still-broken"]["run_status"] == "failed"
+    assert "simulated failure" in by_name["still-broken"]["error"]
+
+
+def test_eval_cli_writes_summary_file(session, tmp_path, capsys):
+    summary = tmp_path / "summary.md"
+    session.add(EvalCase(name="smoke", engine="offline", payload={}, min_score=0.9))
+    session.add(
+        EvalCase(name="still-broken", engine="offline", payload={"fail_at": 1}, min_score=0.9)
+    )
+    session.commit()
+
+    assert run_cases(json_output=True, summary_file=str(summary)) == 1
+    body = json.loads(capsys.readouterr().out)
+    text = summary.read_text()
+
+    assert body["failed"] == 1
+    assert "### Ti Cloud eval gate" in text
+    assert "- Total: 2" in text
+    assert "| smoke |" in text
+    assert "| still-broken |" in text
+    assert "| FAIL |" in text
+
+
+def test_eval_cli_list_json_output(session, capsys):
+    session.add(
+        EvalCase(
+            name="smoke",
+            engine="offline",
+            payload={},
+            min_score=0.7,
+            source_signature="abc123",
+            enabled=False,
+        )
+    )
+    session.commit()
+
+    assert list_cases(json_output=True) == 0
+    body = json.loads(capsys.readouterr().out)
+
+    assert body["total"] == 1
+    assert body["cases"][0]["name"] == "smoke"
+    assert body["cases"][0]["min_score"] == 0.7
+    assert body["cases"][0]["source_signature"] == "abc123"
+    assert body["cases"][0]["enabled"] is False
+
+
+def test_eval_cases_can_run_via_api(client):
+    assert client.post("/eval-cases", json={"name": "smoke", "payload": {}}).status_code == 201
+    assert (
+        client.post(
+            "/eval-cases",
+            json={"name": "still-broken", "payload": {"fail_at": 1}},
+        ).status_code
+        == 201
+    )
+    off = client.post("/eval-cases", json={"name": "off-switch", "payload": {}}).json()
+    assert client.patch(f"/eval-cases/{off['id']}", json={"enabled": False}).status_code == 200
+
+    resp = client.post("/eval-cases/run", json={})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["total"] == 2
+    assert body["passed"] == 1
+    assert body["failed"] == 1
+    by_name = {case["name"]: case for case in body["cases"]}
+    assert set(by_name) == {"smoke", "still-broken"}
+    assert by_name["smoke"]["run_status"] == "succeeded"
+    assert by_name["still-broken"]["passed"] is False
+    assert "simulated failure" in by_name["still-broken"]["error"]
+
+
+def test_eval_case_run_api_can_filter_by_job(client):
+    from test_api import create_job
+
+    job_a = create_job(client, name="source-a", cron=None)
+    job_b = create_job(client, name="source-b", cron=None)
+    client.post("/eval-cases", json={"name": "a-case", "job_id": job_a["id"], "payload": {}})
+    client.post("/eval-cases", json={"name": "b-case", "job_id": job_b["id"], "payload": {}})
+
+    resp = client.post("/eval-cases/run", json={"job_id": job_a["id"], "min_score": 0.5})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["total"] == 1
+    assert body["failed"] == 0
+    assert body["cases"][0]["name"] == "a-case"
+    assert body["cases"][0]["job_id"] == job_a["id"]
+    assert body["cases"][0]["min_score"] == 0.5
 
 
 def test_eval_cli_reuses_eval_job(session):

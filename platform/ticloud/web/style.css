@@ -198,6 +198,16 @@ button:disabled:hover {
   color: var(--ink);
 }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.eval-toolbar { display: flex; justify-content: flex-end; margin: 8px 0 12px; }
+.eval-result { margin-bottom: 12px; }
+.eval-result-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.eval-result-head span { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 
 /* Compact edit forms */
 form.newjob, form.jobsettings, form.lessonform, form.templatejob, form.evalcase { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }

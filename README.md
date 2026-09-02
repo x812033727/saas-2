@@ -67,7 +67,10 @@ schedule → run → score every run → gate (alert / auto-pause)
     eval-set through the real engine + scorers and exits non-zero on any
     case below its `min_score` — wire it into CI
     (`.github/workflows/eval-gate.yml`) and a failure mode stays red until
-    it's actually fixed. Other repos add it in one step with the composite
+    it's actually fixed. Add `--json` when CI or other tooling needs a
+    machine-readable summary, or `--summary-file "$GITHUB_STEP_SUMMARY"` for
+    a PR check summary. The same gate can be run from the Failures page or
+    `POST /eval-cases/run`. Other repos add it in one step with the composite
     action: `uses: x812033727/saas-2@main` with a `database-url` input.
 
 | Drift view (gate drawn in) | Scorer breakdown per run |
@@ -258,6 +261,8 @@ ids) instead of plain text.
 ```bash
 cd platform && python -m pytest
 python -m ticloud.eval.cli run       # eval-set regression gate
+python -m ticloud.eval.cli run --json
+python -m ticloud.eval.cli run --summary-file "$GITHUB_STEP_SUMMARY"
 TICLOUD_DATABASE_URL=sqlite:///./smoke.db python -m ticloud.smoke
 TICLOUD_DATABASE_URL=sqlite:///./smoke.db TICLOUD_SMOKE_BASE_URL=http://127.0.0.1:8000 python -m ticloud.smoke
 ```

@@ -200,6 +200,17 @@ def test_ui_exposes_manual_eval_case_creation(client):
     assert "form.evalcase" in style_css
 
 
+def test_ui_exposes_eval_gate_runner(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert "data-runevals" in app_js
+    assert 'api("/eval-cases/run", { method: "POST", body: "{}" })' in app_js
+    assert "lastEvalSummary" in app_js
+    assert "Eval gate failed" in app_js
+    assert ".eval-result" in style_css
+
+
 def test_overview_includes_last_run(client):
     job = create_job(client, cron=None)
     create_job(client, name="second-job", cron=None)

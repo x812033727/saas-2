@@ -338,6 +338,30 @@ def test_hosted_eval_case_names_are_tenant_scoped(client, hosted):
     assert client.post("/eval-cases", json=spec_a, headers=auth_a).status_code == 409
 
 
+def test_hosted_eval_case_run_is_tenant_scoped(client, hosted):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+    job_a = client.post("/jobs", json={"name": "eval-run-a"}, headers=auth_a).json()
+    job_b = client.post("/jobs", json={"name": "eval-run-b"}, headers=auth_b).json()
+    client.post("/eval-cases", json={"name": "smoke", "job_id": job_a["id"]}, headers=auth_a)
+    client.post("/eval-cases", json={"name": "smoke", "job_id": job_b["id"]}, headers=auth_b)
+
+    body_a = client.post("/eval-cases/run", json={}, headers=auth_a).json()
+    body_b = client.post("/eval-cases/run", json={}, headers=auth_b).json()
+
+    assert body_a["total"] == 1
+    assert body_a["cases"][0]["job_id"] == job_a["id"]
+    assert body_b["total"] == 1
+    assert body_b["cases"][0]["job_id"] == job_b["id"]
+    run_id = body_a["cases"][0]["run_id"]
+    assert client.get(f"/runs/{run_id}", headers=auth_a).status_code == 200
+    assert client.get(f"/runs/{run_id}", headers=auth_b).status_code == 404
+    assert (
+        client.post("/eval-cases/run", json={"job_id": job_a["id"]}, headers=auth_b).status_code
+        == 404
+    )
+
+
 def test_hosted_eval_case_patch_is_tenant_scoped(client, hosted):
     _, _, auth_a = _mint_tenant(client, "team-a")
     _, _, auth_b = _mint_tenant(client, "team-b")

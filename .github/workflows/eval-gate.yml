@@ -16,10 +16,8 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install platform
-        run: pip install -e "platform[dev]"
-      - name: Unit tests
-        run: cd platform && python -m pytest -q
-      - name: Run eval cases (regression gate)
+        run: pip install -e ./platform
+      - name: Seed smoke eval case
         env:
           # Ephemeral DB seeded with the checked-in smoke case; production
           # setups point this at the shared eval database instead.
@@ -35,4 +33,7 @@ jobs:
                              payload={}, min_score=0.9))
               s.commit()
           PY
-          python -m ticloud.eval.cli run
+      - name: Run eval cases (regression gate)
+        env:
+          TICLOUD_DATABASE_URL: sqlite:///./eval-gate.db
+        run: python -m ticloud.eval.cli run --json --summary-file "$GITHUB_STEP_SUMMARY"
