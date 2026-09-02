@@ -38,4 +38,5 @@ runs:
         args=()
         [ -n "${{ inputs.min-score }}" ] && args+=(--min-score "${{ inputs.min-score }}")
         [ -n "${{ inputs.job }}" ] && args+=(--job "${{ inputs.job }}")
-        python -m ticloud.eval.cli run "${args[@]}"
+        [ -n "${GITHUB_STEP_SUMMARY:-}" ] && args+=(--summary-file "$GITHUB_STEP_SUMMARY")
+        python -m ticloud.eval.cli run "${args[@]}" --json

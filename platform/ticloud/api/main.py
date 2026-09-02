@@ -20,6 +20,7 @@ from .. import __version__
 from ..billing import month_to_date_cost, runs_since_filter, tenant_over_budget
 from ..db import SessionLocal, init_db
 from ..eval.failures import cluster_failures
+from ..eval.runner import eval_cases_payload
 from ..config import settings
 from ..metrics import configure_logging, render_metrics
 from ..models import (
@@ -48,6 +49,8 @@ from .schemas import (
     EvalCaseCreate,
     EvalCaseOut,
     EvalCaseUpdate,
+    EvalRunRequest,
+    EvalRunSummary,
     FailureModeOut,
     JobCreate,
     JobOut,
@@ -709,6 +712,23 @@ def list_eval_cases(
     if tenant is not None:
         stmt = stmt.where(EvalCase.job_id.in_(_tenant_job_ids(session, tenant)))
     return session.scalars(stmt).all()
+
+
+@app.post("/eval-cases/run", response_model=EvalRunSummary)
+def run_eval_cases(
+    body: EvalRunRequest | None = None,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> dict:
+    body = body or EvalRunRequest()
+    stmt = select(EvalCase).where(EvalCase.enabled.is_(True)).order_by(EvalCase.created_at)
+    if body.job_id is not None:
+        _get_job(session, body.job_id, tenant)
+        stmt = stmt.where(EvalCase.job_id == body.job_id)
+    elif tenant is not None:
+        stmt = stmt.where(EvalCase.job_id.in_(_tenant_job_ids(session, tenant)))
+    cases = session.scalars(stmt).all()
+    return eval_cases_payload(session, cases, body.min_score)
 
 
 def _eval_case_name_exists(session: Session, name: str, tenant: Tenant | None) -> bool:
