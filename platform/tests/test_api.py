@@ -1,3 +1,6 @@
+from sqlalchemy import select
+
+from ticloud.models import Alert, EvalCase, Job, Lesson, Run, RunStep, ScoreRecord
 from ticloud.scheduler.worker import execute_run
 
 
@@ -205,3 +208,34 @@ def test_missing_resources_404(client):
     assert client.get("/jobs/nope").status_code == 404
     assert client.get("/runs/nope").status_code == 404
     assert client.post("/jobs/nope/trigger").status_code == 404
+
+
+def test_delete_job_removes_history_and_owned_artifacts(client, session):
+    job = create_job(client, cron=None)
+    run = client.post(f"/jobs/{job['id']}/trigger").json()
+    execute_run(run["id"])
+    client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={"title": "manual:cleanup", "content": "Safe to delete with the job."},
+    )
+    session.add_all(
+        [
+            Alert(job_id=job["id"], run_id=run["id"], kind="low_score", message="low"),
+            EvalCase(name="owned-case", job_id=job["id"], payload={}),
+            EvalCase(name="global-case", payload={}),
+        ]
+    )
+    session.commit()
+
+    resp = client.delete(f"/jobs/{job['id']}")
+
+    assert resp.status_code == 204
+    session.expire_all()
+    assert session.get(Job, job["id"]) is None
+    assert session.scalar(select(Run).where(Run.job_id == job["id"])) is None
+    assert session.scalar(select(RunStep).where(RunStep.run_id == run["id"])) is None
+    assert session.scalar(select(ScoreRecord).where(ScoreRecord.run_id == run["id"])) is None
+    assert session.scalar(select(Alert).where(Alert.job_id == job["id"])) is None
+    assert session.scalar(select(Lesson).where(Lesson.job_id == job["id"])) is None
+    assert session.scalar(select(EvalCase).where(EvalCase.name == "owned-case")) is None
+    assert session.scalar(select(EvalCase).where(EvalCase.name == "global-case")) is not None

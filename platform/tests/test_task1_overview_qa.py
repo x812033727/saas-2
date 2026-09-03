@@ -176,7 +176,7 @@ def test_qa_jobs_attention_summary_handles_missing_and_dirty_counts():
     });
     assert(both.includes("#/alerts/open/job%20id%2F1"));
     assert(both.includes("2 alerts"));
-    assert(both.includes("#/approvals"));
+    assert(both.includes("#/approvals/job%20id%2F1"));
     assert(both.includes("1 approval"));
 
     const dirty = summary({
