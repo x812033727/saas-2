@@ -189,6 +189,13 @@ button.primary {
   color: #fff;
 }
 button.primary:hover { opacity: 0.9; }
+button.danger {
+  color: var(--critical);
+}
+button.danger:hover {
+  border-color: var(--critical);
+  color: var(--critical);
+}
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;

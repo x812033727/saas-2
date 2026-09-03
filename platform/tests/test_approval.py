@@ -54,6 +54,22 @@ def test_gate_holds_run_then_approve_runs_it(session, client):
     assert session.get(Run, run["id"]).status == RunStatus.SUCCEEDED
 
 
+def test_approvals_queue_can_filter_by_job(session, client):
+    job = create_job(client, name="review-a", cron=None)
+    other = create_job(client, name="review-b", cron=None)
+    session.add_all(
+        [
+            Run(job_id=job["id"], status=RunStatus.AWAITING_APPROVAL, approval_state="pending"),
+            Run(job_id=other["id"], status=RunStatus.AWAITING_APPROVAL, approval_state="pending"),
+        ]
+    )
+    session.commit()
+
+    scoped = client.get("/approvals", params={"job_id": job["id"]}).json()
+    assert [r["job_id"] for r in scoped] == [job["id"]]
+    assert client.get("/approvals", params={"job_id": "missing"}).status_code == 404
+
+
 def test_reject_terminates_without_running(session, client):
     job = create_job(client, cron=None, approval_required=True)
     run = _trigger_and_execute(session, client, job["id"])
@@ -127,6 +143,13 @@ def test_approvals_queue_is_tenant_scoped(client, hosted, session):
 
     visible_to_a = [r["id"] for r in client.get("/approvals", headers=auth_a).json()]
     assert visible_to_a == [run["id"]]
+    scoped_to_a = client.get(
+        "/approvals",
+        params={"job_id": job["id"]},
+        headers=auth_a,
+    ).json()
+    assert [r["id"] for r in scoped_to_a] == [run["id"]]
     assert client.get("/approvals", headers=auth_b).json() == []
+    assert client.get("/approvals", params={"job_id": job["id"]}, headers=auth_b).status_code == 404
     assert client.post(f"/runs/{run['id']}/approve", headers=auth_b).status_code == 404
     assert client.post(f"/runs/{run['id']}/reject", headers=auth_b).status_code == 404

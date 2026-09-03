@@ -79,7 +79,10 @@ def test_ui_exposes_approval_controls(client):
 
     assert "#/approvals" in index
     assert 'name="approval_required"' in app_js
-    assert 'api("/approvals")' in app_js
+    assert "async function approvalsView(jobId = null)" in app_js
+    assert 'const scoped = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";' in app_js
+    assert "api(`/approvals${scoped}`)" in app_js
+    assert "await approvalsView(id || null)" in app_js
     assert 'data-runact="approve"' in app_js
     assert 'data-runact="reject"' in app_js
 
@@ -136,6 +139,19 @@ def test_ui_exposes_job_settings_editor(client):
     assert "`/jobs/${id}`" in app_js
     assert 'name="approval_required"' in app_js
     assert 'name="webhook_url"' in app_js
+
+
+def test_ui_exposes_job_delete_controls(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert 'data-deljob="${j.id}"' in app_js
+    assert 'data-deljob="${job.id}"' in app_js
+    assert 'confirm("Delete this job and all of its runs?")' in app_js
+    assert "`/jobs/${deleteJobBtn.dataset.deljob}`" in app_js
+    assert '{ method: "DELETE" }' in app_js
+    assert 'location.hash = "#/jobs"' in app_js
+    assert "button.danger" in style_css
 
 
 def test_ui_exposes_template_job_creation(client):
@@ -205,10 +221,21 @@ def test_ui_exposes_eval_gate_runner(client):
     style_css = client.get("/ui/style.css").text
 
     assert "data-runevals" in app_js
-    assert 'api("/eval-cases/run", { method: "POST", body: "{}" })' in app_js
+    assert 'api("/eval-cases/run", { method: "POST", body: JSON.stringify(body) })' in app_js
     assert "lastEvalSummary" in app_js
+    assert "lastEvalScope" in app_js
     assert "Eval gate failed" in app_js
     assert ".eval-result" in style_css
+
+
+def test_ui_exposes_job_scoped_eval_gate_runner(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert 'data-runevals-job="${esc(job.id)}"' in app_js
+    assert "Run job evals" in app_js
+    assert "const body = jobId ? { job_id: jobId } : {}" in app_js
+    assert "lastEvalScope = jobId ? `job:${jobId}` : \"all\"" in app_js
+    assert "lastEvalScope === `job:${id}`" in app_js
 
 
 def test_overview_includes_last_run(client):
@@ -242,6 +269,7 @@ def test_jobs_view_uses_overview_attention_counts(client):
     assert "function attentionSummary(job)" in app_js
     assert "job.unacknowledged_alerts" in app_js
     assert "job.awaiting_approval_runs" in app_js
+    assert 'href="#/approvals/${encodeURIComponent(job.id)}"' in app_js
     assert "<th>Needs action</th>" in app_js
     assert 'class="attention" data-noclick' in app_js
     assert ".attention-pill.alert" in style_css

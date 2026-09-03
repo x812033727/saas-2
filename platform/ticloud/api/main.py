@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from pydantic import ValidationError as PydanticValidationError
@@ -33,6 +33,7 @@ from ..models import (
     Run,
     RunStatus,
     RunStep,
+    ScoreRecord,
     Tenant,
     utcnow,
 )
@@ -403,7 +404,15 @@ def delete_job(
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> None:
-    session.delete(_get_job(session, job_id, tenant))
+    job = _get_job(session, job_id, tenant)
+    run_ids = select(Run.id).where(Run.job_id == job.id)
+    session.execute(delete(Alert).where(Alert.job_id == job.id))
+    session.execute(delete(Lesson).where(Lesson.job_id == job.id))
+    session.execute(delete(EvalCase).where(EvalCase.job_id == job.id))
+    session.execute(delete(ScoreRecord).where(ScoreRecord.run_id.in_(run_ids)))
+    session.execute(delete(RunStep).where(RunStep.run_id.in_(run_ids)))
+    session.execute(delete(Run).where(Run.job_id == job.id))
+    session.delete(job)
     session.commit()
 
 
@@ -912,11 +921,16 @@ def rerun_run(
 
 @app.get("/approvals", response_model=list[RunOut])
 def list_approvals(
-    session: Session = Depends(db), tenant: Tenant | None = Depends(current_tenant)
+    job_id: str | None = Query(default=None, min_length=1, max_length=32),
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
 ) -> list[Run]:
     """Runs held for human approval (the approvals queue)."""
     stmt = select(Run).where(Run.status == RunStatus.AWAITING_APPROVAL)
-    if tenant is not None:
+    if job_id is not None:
+        job = _get_job(session, job_id, tenant)
+        stmt = stmt.where(Run.job_id == job.id)
+    elif tenant is not None:
         stmt = stmt.where(Run.job_id.in_(_tenant_job_ids(session, tenant)))
     return session.scalars(stmt.order_by(Run.scheduled_at.desc())).all()
 

@@ -3,6 +3,7 @@
 const app = document.getElementById("app");
 let pollTimer = null;
 let lastEvalSummary = null;
+let lastEvalScope = null;
 
 /* ---------- helpers ---------- */
 
@@ -98,6 +99,28 @@ function toast(msg) {
   setTimeout(() => el.classList.remove("show"), 2200);
 }
 
+function evalSummaryPanel(summary) {
+  if (!summary) return "";
+  return `
+    <div class="eval-result card">
+      <div class="eval-result-head">
+        <strong>${summary.failed ? "Eval gate failed" : "Eval gate passed"}</strong>
+        <span>${summary.passed}/${summary.total} passed</span>
+      </div>
+      ${summary.cases.length ? `<table>
+        <thead><tr><th>Case</th><th>Status</th><th class="num">Score</th><th class="num">Min</th><th>Result</th></tr></thead>
+        <tbody>${summary.cases.map((c) => `
+          <tr>
+            <td><strong>${esc(c.name)}</strong></td>
+            <td><a href="#/runs/${esc(c.run_id)}">${badge(c.run_status)}</a></td>
+            <td class="num">${fmtScore(c.score)}</td>
+            <td class="num">${fmtScore(c.min_score)}</td>
+            <td>${c.passed ? '<span style="color:var(--good-text)">PASS</span>' : '<span style="color:var(--critical)">FAIL</span>'}</td>
+          </tr>`).join("")}</tbody></table>`
+        : `<div class="empty">No enabled eval cases to run.</div>`}
+    </div>`;
+}
+
 async function act(method, path, refresh) {
   try { await api(path, { method }); toast("done"); }
   catch (e) { toast(e.message); }
@@ -157,7 +180,7 @@ function attentionSummary(job) {
   if (!alerts && !approvals) return `<span class="muted">—</span>`;
   return `<div class="attention-stack">
     ${alerts ? `<a class="attention-pill alert" href="#/alerts/open/${encodeURIComponent(job.id)}">${alerts} alert${alerts === 1 ? "" : "s"}</a>` : ""}
-    ${approvals ? `<a class="attention-pill approval" href="#/approvals">${approvals} approval${approvals === 1 ? "" : "s"}</a>` : ""}
+    ${approvals ? `<a class="attention-pill approval" href="#/approvals/${encodeURIComponent(job.id)}">${approvals} approval${approvals === 1 ? "" : "s"}</a>` : ""}
   </div>`;
 }
 
@@ -210,6 +233,7 @@ async function jobsView() {
       <td class="actions" data-noclick>
         <button data-act="trigger" data-id="${j.id}">Run now</button>
         <button data-act="${j.paused ? "resume" : "pause"}" data-id="${j.id}">${j.paused ? "Resume" : "Pause"}</button>
+        <button class="danger" data-deljob="${j.id}">Delete</button>
       </td>
     </tr>`).join("");
 
@@ -293,6 +317,8 @@ async function jobDetailView(id) {
     api("/eval-cases"),
   ]);
   const jobCases = cases.filter((c) => c.job_id === id);
+  const canRunJobEvals = jobCases.some((c) => c.enabled);
+  const evalResult = lastEvalScope === `job:${id}` ? evalSummaryPanel(lastEvalSummary) : "";
   const promoted = new Set(jobCases.map((c) => c.source_signature).filter(Boolean));
   const rows = runs.map((r) => `
     <tr class="rowlink" data-href="#/runs/${r.id}">
@@ -353,6 +379,8 @@ async function jobDetailView(id) {
         : `<div class="empty">No failed runs for this job yet.</div>`}
     </div>
     <h2>Regression eval cases</h2>
+    <div class="eval-toolbar"><button class="primary" data-runevals data-runevals-job="${esc(job.id)}" ${canRunJobEvals ? "" : "disabled"}>Run job evals</button></div>
+    ${evalResult}
     <div class="card">
       ${jobCases.length ? `<table>
         <thead><tr><th>Name</th><th>Engine</th><th class="num">Min score</th><th>Source</th><th></th></tr></thead>
@@ -392,6 +420,7 @@ async function jobDetailView(id) {
     <div class="actions">
       <button class="primary" data-act="trigger" data-id="${job.id}">Run now</button>
       <button data-act="${job.paused ? "resume" : "pause"}" data-id="${job.id}">${job.paused ? "Resume" : "Pause"}</button>
+      <button class="danger" data-deljob="${job.id}">Delete job</button>
     </div>`;
 
   document.getElementById("jobsettings").addEventListener("submit", async (ev) => {
@@ -524,8 +553,9 @@ async function runDetailView(id) {
   }
 }
 
-async function approvalsView() {
-  const runs = await api("/approvals");
+async function approvalsView(jobId = null) {
+  const scoped = jobId ? `?job_id=${encodeURIComponent(jobId)}` : "";
+  const runs = await api(`/approvals${scoped}`);
   const rows = runs.map((r) => `
     <tr>
       <td>${badge(r.status)}</td>
@@ -541,6 +571,7 @@ async function approvalsView() {
   app.innerHTML = `
     <h1>Approvals</h1>
     <div class="sub">runs waiting for a human before the engine starts</div>
+    ${jobId ? `<div class="sub">filtered to job ${esc(jobId.slice(0, 8))} · <a href="#/approvals">show all approvals</a></div>` : ""}
     <div class="card">
       ${runs.length ? `<table>
         <thead><tr><th>Status</th><th>Run</th><th>Requested</th><th class="num">Attempt</th><th></th></tr></thead>
@@ -641,24 +672,8 @@ async function failuresView() {
         <button data-delcase="${c.id}">Delete</button>
       </td>
     </tr>`).join("");
-  const evalResult = lastEvalSummary ? `
-    <div class="eval-result card">
-      <div class="eval-result-head">
-        <strong>${lastEvalSummary.failed ? "Eval gate failed" : "Eval gate passed"}</strong>
-        <span>${lastEvalSummary.passed}/${lastEvalSummary.total} passed</span>
-      </div>
-      ${lastEvalSummary.cases.length ? `<table>
-        <thead><tr><th>Case</th><th>Status</th><th class="num">Score</th><th class="num">Min</th><th>Result</th></tr></thead>
-        <tbody>${lastEvalSummary.cases.map((c) => `
-          <tr>
-            <td><strong>${esc(c.name)}</strong></td>
-            <td><a href="#/runs/${esc(c.run_id)}">${badge(c.run_status)}</a></td>
-            <td class="num">${fmtScore(c.score)}</td>
-            <td class="num">${fmtScore(c.min_score)}</td>
-            <td>${c.passed ? '<span style="color:var(--good-text)">PASS</span>' : '<span style="color:var(--critical)">FAIL</span>'}</td>
-          </tr>`).join("")}</tbody></table>`
-        : `<div class="empty">No enabled eval cases to run.</div>`}
-    </div>` : "";
+  const hasEnabledCases = cases.some((c) => c.enabled);
+  const evalResult = lastEvalScope === "all" ? evalSummaryPanel(lastEvalSummary) : "";
 
   app.innerHTML = `
     <h1>Failure modes</h1>
@@ -671,7 +686,7 @@ async function failuresView() {
     </div>
     <h2>Eval cases</h2>
     <div class="sub">replayed by <code>python -m ticloud.eval.cli run</code> — wire into CI to block regressions</div>
-    <div class="eval-toolbar"><button class="primary" data-runevals ${cases.length ? "" : "disabled"}>Run evals</button></div>
+    <div class="eval-toolbar"><button class="primary" data-runevals ${hasEnabledCases ? "" : "disabled"}>Run evals</button></div>
     ${evalResult}
     <details class="panel">
       <summary>＋ New eval case</summary>
@@ -714,6 +729,7 @@ async function failuresView() {
     try {
       await api("/eval-cases", { method: "POST", body: JSON.stringify(body) });
       lastEvalSummary = null;
+      lastEvalScope = null;
       toast("eval case created");
       render();
     } catch (e) { toast(e.message); }
@@ -787,7 +803,7 @@ async function render() {
   try {
     if (view === "runs" && id) await runDetailView(id);
     else if (view === "usage") { await usageView(); schedulePoll(15000); }
-    else if (view === "approvals") { await approvalsView(); schedulePoll(5000); }
+    else if (view === "approvals") { await approvalsView(id || null); schedulePoll(5000); }
     else if (view === "failures") { await failuresView(); schedulePoll(6000); }
     else if (view === "alerts") { await alertsView(id || "all", subid || null); schedulePoll(5000); }
     else if (view === "jobs" && id) { await jobDetailView(id); schedulePoll(3000); }
@@ -819,7 +835,7 @@ app.addEventListener("click", (ev) => {
     api("/failure-modes/promote", {
       method: "POST",
       body: JSON.stringify(body),
-    }).then(() => { lastEvalSummary = null; toast("eval case created"); render(); }).catch((e) => toast(e.message));
+    }).then(() => { lastEvalSummary = null; lastEvalScope = null; toast("eval case created"); render(); }).catch((e) => toast(e.message));
     return;
   }
   const runEvalsBtn = ev.target.closest("button[data-runevals]");
@@ -827,9 +843,12 @@ app.addEventListener("click", (ev) => {
     ev.stopPropagation();
     runEvalsBtn.disabled = true;
     runEvalsBtn.textContent = "Running...";
-    api("/eval-cases/run", { method: "POST", body: "{}" })
+    const jobId = runEvalsBtn.dataset.runevalsJob || "";
+    const body = jobId ? { job_id: jobId } : {};
+    api("/eval-cases/run", { method: "POST", body: JSON.stringify(body) })
       .then((summary) => {
         lastEvalSummary = summary;
+        lastEvalScope = jobId ? `job:${jobId}` : "all";
         toast(summary.failed ? "eval gate failed" : "eval gate passed");
         render();
       })
@@ -840,6 +859,7 @@ app.addEventListener("click", (ev) => {
   if (delBtn) {
     ev.stopPropagation();
     lastEvalSummary = null;
+    lastEvalScope = null;
     act("DELETE", `/eval-cases/${delBtn.dataset.delcase}`, render);
     return;
   }
@@ -849,13 +869,22 @@ app.addEventListener("click", (ev) => {
     api(`/eval-cases/${toggleBtn.dataset.togglecase}`, {
       method: "PATCH",
       body: JSON.stringify({ enabled: toggleBtn.dataset.enabled === "true" }),
-    }).then(() => { lastEvalSummary = null; toast("eval case updated"); render(); }).catch((e) => toast(e.message));
+    }).then(() => { lastEvalSummary = null; lastEvalScope = null; toast("eval case updated"); render(); }).catch((e) => toast(e.message));
     return;
   }
   const lessonBtn = ev.target.closest("button[data-dellesson]");
   if (lessonBtn) {
     ev.stopPropagation();
     act("DELETE", `/jobs/${lessonBtn.dataset.job}/lessons/${lessonBtn.dataset.dellesson}`, render);
+    return;
+  }
+  const deleteJobBtn = ev.target.closest("button[data-deljob]");
+  if (deleteJobBtn) {
+    ev.stopPropagation();
+    if (!confirm("Delete this job and all of its runs?")) return;
+    api(`/jobs/${deleteJobBtn.dataset.deljob}`, { method: "DELETE" })
+      .then(() => { toast("job deleted"); location.hash = "#/jobs"; render(); })
+      .catch((e) => toast(e.message));
     return;
   }
   const btn = ev.target.closest("button[data-act]");
