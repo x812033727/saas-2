@@ -61,16 +61,19 @@ schedule → run → score every run → gate (alert / auto-pause)
     failure signature); engines read lessons before starting, so a retry —
     and every later run — avoids the trap it already hit.
   - **Failure modes**: failed runs cluster by normalized error signature
-    (no embedding API needed); one click promotes a recurring mode into a
-    regression **eval case**.
+    (no embedding API needed); `GET /failure-modes?min_count=2` focuses the
+    list on recurring failures, `unpromoted_only=true` shows what still needs
+    an eval case, and one click promotes a recurring mode into a regression
+    **eval case**.
   - **Eval CLI / CI gate**: `python -m ticloud.eval.cli run` replays the
     eval-set through the real engine + scorers and exits non-zero on any
     case below its `min_score` — wire it into CI
     (`.github/workflows/eval-gate.yml`) and a failure mode stays red until
     it's actually fixed. Add `--json` when CI or other tooling needs a
     machine-readable summary, or `--summary-file "$GITHUB_STEP_SUMMARY"` for
-    a PR check summary. The same gate can be run from the Failures page or
-    `POST /eval-cases/run`. Other repos add it in one step with the composite
+    a PR check summary. The same gate can be run from the Failures page,
+    a job detail page, or `POST /eval-cases/run` (add `job_id` to run only
+    that job's cases). Other repos add it in one step with the composite
     action: `uses: x812033727/saas-2@main` with a `database-url` input.
 
 | Drift view (gate drawn in) | Scorer breakdown per run |

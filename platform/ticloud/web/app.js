@@ -3,6 +3,7 @@
 const app = document.getElementById("app");
 let pollTimer = null;
 let lastEvalSummary = null;
+let lastEvalJobId = null;
 
 /* ---------- helpers ---------- */
 
@@ -96,6 +97,32 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add("show");
   setTimeout(() => el.classList.remove("show"), 2200);
+}
+
+function clearEvalResult() {
+  lastEvalSummary = null;
+  lastEvalJobId = null;
+}
+
+function evalResultCard(summary) {
+  return summary ? `
+    <div class="eval-result card">
+      <div class="eval-result-head">
+        <strong>${summary.failed ? "Eval gate failed" : "Eval gate passed"}</strong>
+        <span>${summary.passed}/${summary.total} passed</span>
+      </div>
+      ${summary.cases.length ? `<table>
+        <thead><tr><th>Case</th><th>Status</th><th class="num">Score</th><th class="num">Min</th><th>Result</th></tr></thead>
+        <tbody>${summary.cases.map((c) => `
+          <tr>
+            <td><strong>${esc(c.name)}</strong></td>
+            <td><a href="#/runs/${esc(c.run_id)}">${badge(c.run_status)}</a></td>
+            <td class="num">${fmtScore(c.score)}</td>
+            <td class="num">${fmtScore(c.min_score)}</td>
+            <td>${c.passed ? '<span style="color:var(--good-text)">PASS</span>' : '<span style="color:var(--critical)">FAIL</span>'}</td>
+          </tr>`).join("")}</tbody></table>`
+        : `<div class="empty">No enabled eval cases to run.</div>`}
+    </div>` : "";
 }
 
 async function act(method, path, refresh) {
@@ -293,7 +320,8 @@ async function jobDetailView(id) {
     api("/eval-cases"),
   ]);
   const jobCases = cases.filter((c) => c.job_id === id);
-  const promoted = new Set(jobCases.map((c) => c.source_signature).filter(Boolean));
+  const hasEnabledJobCases = jobCases.some((c) => c.enabled);
+  const jobEvalResult = lastEvalJobId === id ? evalResultCard(lastEvalSummary) : "";
   const rows = runs.map((r) => `
     <tr class="rowlink" data-href="#/runs/${r.id}">
       <td>${badge(r.status)}</td>
@@ -346,13 +374,17 @@ async function jobDetailView(id) {
               ${m.latest_run_id ? `<br><a href="#/runs/${m.latest_run_id}"><small>latest run</small></a>` : ""}</td>
             <td class="num">${m.count}</td>
             <td>${relTime(m.last_seen)}</td>
-            <td class="actions">${promoted.has(m.signature)
+            <td class="actions">${m.promoted
               ? '<span style="color:var(--good-text);font-size:13px">✓ eval case</span>'
               : `<button class="primary" data-promote="${esc(m.signature)}" data-job="${esc(job.id)}">Promote</button>`}</td>
           </tr>`).join("")}</tbody></table>`
         : `<div class="empty">No failed runs for this job yet.</div>`}
     </div>
     <h2>Regression eval cases</h2>
+    <div class="eval-toolbar">
+      <button class="primary" data-runevals data-job="${esc(job.id)}" ${hasEnabledJobCases ? "" : "disabled"}>Run job evals</button>
+    </div>
+    ${jobEvalResult}
     <div class="card">
       ${jobCases.length ? `<table>
         <thead><tr><th>Name</th><th>Engine</th><th class="num">Min score</th><th>Source</th><th></th></tr></thead>
@@ -609,13 +641,18 @@ async function alertsView(filter = "all", jobId = null) {
     </div>`;
 }
 
-async function failuresView() {
+async function failuresView(filter = "all") {
+  filter = ["recurring", "unpromoted"].includes(filter) ? filter : "all";
+  const recurringOnly = filter === "recurring";
+  const unpromotedOnly = filter === "unpromoted";
+  const params = new URLSearchParams({ min_count: String(recurringOnly ? 2 : 1) });
+  if (unpromotedOnly) params.set("unpromoted_only", "true");
   const [modes, cases, jobs] = await Promise.all([
-    api("/failure-modes"),
+    api(`/failure-modes?${params}`),
     api("/eval-cases"),
     api("/jobs").catch(() => []),
   ]);
-  const promoted = new Set(cases.map((c) => c.source_signature).filter(Boolean));
+  const hasEnabledCases = cases.some((c) => c.enabled);
   const jobOptions = jobs.map((j) => `<option value="${esc(j.id)}">${esc(j.name)}</option>`).join("");
 
   const modeRows = modes.map((m) => `
@@ -625,7 +662,7 @@ async function failuresView() {
         ${m.latest_run_id ? `<br><a href="#/runs/${m.latest_run_id}"><small>latest run</small></a>` : ""}</td>
       <td class="num">${m.count}</td>
       <td>${relTime(m.last_seen)}</td>
-      <td class="actions">${promoted.has(m.signature)
+      <td class="actions">${m.promoted
         ? '<span style="color:var(--good-text);font-size:13px">✓ eval case</span>'
         : `<button class="primary" data-promote="${esc(m.signature)}">Promote to eval case</button>`}</td>
     </tr>`).join("");
@@ -641,37 +678,25 @@ async function failuresView() {
         <button data-delcase="${c.id}">Delete</button>
       </td>
     </tr>`).join("");
-  const evalResult = lastEvalSummary ? `
-    <div class="eval-result card">
-      <div class="eval-result-head">
-        <strong>${lastEvalSummary.failed ? "Eval gate failed" : "Eval gate passed"}</strong>
-        <span>${lastEvalSummary.passed}/${lastEvalSummary.total} passed</span>
-      </div>
-      ${lastEvalSummary.cases.length ? `<table>
-        <thead><tr><th>Case</th><th>Status</th><th class="num">Score</th><th class="num">Min</th><th>Result</th></tr></thead>
-        <tbody>${lastEvalSummary.cases.map((c) => `
-          <tr>
-            <td><strong>${esc(c.name)}</strong></td>
-            <td><a href="#/runs/${esc(c.run_id)}">${badge(c.run_status)}</a></td>
-            <td class="num">${fmtScore(c.score)}</td>
-            <td class="num">${fmtScore(c.min_score)}</td>
-            <td>${c.passed ? '<span style="color:var(--good-text)">PASS</span>' : '<span style="color:var(--critical)">FAIL</span>'}</td>
-          </tr>`).join("")}</tbody></table>`
-        : `<div class="empty">No enabled eval cases to run.</div>`}
-    </div>` : "";
+  const evalResult = lastEvalJobId === null ? evalResultCard(lastEvalSummary) : "";
 
   app.innerHTML = `
     <h1>Failure modes</h1>
     <div class="sub">failed runs clustered by error signature — promote recurring ones into regression eval cases</div>
+    <div class="tabs" aria-label="Failure mode filters">
+      <a class="${filter === "all" ? "active" : ""}" href="#/failures">All</a>
+      <a class="${recurringOnly ? "active" : ""}" href="#/failures/recurring">Recurring</a>
+      <a class="${unpromotedOnly ? "active" : ""}" href="#/failures/unpromoted">Unpromoted</a>
+    </div>
     <div class="card">
       ${modes.length ? `<table>
         <thead><tr><th>Signature</th><th>Error</th><th class="num">Count</th><th>Last seen</th><th></th></tr></thead>
         <tbody>${modeRows}</tbody></table>`
-      : `<div class="empty">No failures recorded — nothing to cluster.</div>`}
+      : `<div class="empty">No ${unpromotedOnly ? "unpromoted " : recurringOnly ? "recurring " : ""}failures recorded — nothing to cluster.</div>`}
     </div>
     <h2>Eval cases</h2>
     <div class="sub">replayed by <code>python -m ticloud.eval.cli run</code> — wire into CI to block regressions</div>
-    <div class="eval-toolbar"><button class="primary" data-runevals ${cases.length ? "" : "disabled"}>Run evals</button></div>
+    <div class="eval-toolbar"><button class="primary" data-runevals ${hasEnabledCases ? "" : "disabled"}>Run evals</button></div>
     ${evalResult}
     <details class="panel">
       <summary>＋ New eval case</summary>
@@ -713,7 +738,7 @@ async function failuresView() {
     if (jobId) body.job_id = jobId;
     try {
       await api("/eval-cases", { method: "POST", body: JSON.stringify(body) });
-      lastEvalSummary = null;
+      clearEvalResult();
       toast("eval case created");
       render();
     } catch (e) { toast(e.message); }
@@ -788,7 +813,7 @@ async function render() {
     if (view === "runs" && id) await runDetailView(id);
     else if (view === "usage") { await usageView(); schedulePoll(15000); }
     else if (view === "approvals") { await approvalsView(); schedulePoll(5000); }
-    else if (view === "failures") { await failuresView(); schedulePoll(6000); }
+    else if (view === "failures") { await failuresView(id); schedulePoll(6000); }
     else if (view === "alerts") { await alertsView(id || "all", subid || null); schedulePoll(5000); }
     else if (view === "jobs" && id) { await jobDetailView(id); schedulePoll(3000); }
     else { await jobsView(); schedulePoll(3000); }
@@ -819,7 +844,7 @@ app.addEventListener("click", (ev) => {
     api("/failure-modes/promote", {
       method: "POST",
       body: JSON.stringify(body),
-    }).then(() => { lastEvalSummary = null; toast("eval case created"); render(); }).catch((e) => toast(e.message));
+    }).then(() => { clearEvalResult(); toast("eval case created"); render(); }).catch((e) => toast(e.message));
     return;
   }
   const runEvalsBtn = ev.target.closest("button[data-runevals]");
@@ -827,8 +852,11 @@ app.addEventListener("click", (ev) => {
     ev.stopPropagation();
     runEvalsBtn.disabled = true;
     runEvalsBtn.textContent = "Running...";
-    api("/eval-cases/run", { method: "POST", body: "{}" })
+    const jobId = runEvalsBtn.dataset.job || null;
+    const body = jobId ? { job_id: jobId } : {};
+    api("/eval-cases/run", { method: "POST", body: JSON.stringify(body) })
       .then((summary) => {
+        lastEvalJobId = jobId;
         lastEvalSummary = summary;
         toast(summary.failed ? "eval gate failed" : "eval gate passed");
         render();
@@ -839,7 +867,7 @@ app.addEventListener("click", (ev) => {
   const delBtn = ev.target.closest("button[data-delcase]");
   if (delBtn) {
     ev.stopPropagation();
-    lastEvalSummary = null;
+    clearEvalResult();
     act("DELETE", `/eval-cases/${delBtn.dataset.delcase}`, render);
     return;
   }
@@ -849,7 +877,7 @@ app.addEventListener("click", (ev) => {
     api(`/eval-cases/${toggleBtn.dataset.togglecase}`, {
       method: "PATCH",
       body: JSON.stringify({ enabled: toggleBtn.dataset.enabled === "true" }),
-    }).then(() => { lastEvalSummary = null; toast("eval case updated"); render(); }).catch((e) => toast(e.message));
+    }).then(() => { clearEvalResult(); toast("eval case updated"); render(); }).catch((e) => toast(e.message));
     return;
   }
   const lessonBtn = ev.target.closest("button[data-dellesson]");

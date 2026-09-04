@@ -294,6 +294,7 @@ class FailureModeOut(BaseModel):
     signature: str
     summary: str
     count: int
+    promoted: bool = False
     job_ids: list[str]
     first_seen: datetime | None
     last_seen: datetime | None
