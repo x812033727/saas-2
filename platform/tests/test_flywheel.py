@@ -136,6 +136,50 @@ def test_promote_failure_mode_can_target_one_job_when_signature_is_shared(client
     assert case_a["name"] == f"regression-{job_a['id'][:8]}-{sig_a}"
 
 
+def test_failure_modes_can_filter_to_recurring_failures(client):
+    from test_api import create_job
+
+    repeated = create_job(
+        client, name="repeated", cron=None, max_retries=0, payload={"fail_at": 3}
+    )
+    one_off = create_job(
+        client, name="one-off", cron=None, max_retries=0, payload={"fail_at": 0}
+    )
+
+    for _ in range(2):
+        run = client.post(f"/jobs/{repeated['id']}/trigger").json()
+        execute_run(run["id"])
+    run = client.post(f"/jobs/{one_off['id']}/trigger").json()
+    execute_run(run["id"])
+
+    modes = client.get("/failure-modes").json()
+    assert [m["count"] for m in modes] == [2, 1]
+
+    recurring = client.get("/failure-modes?min_count=2").json()
+    assert len(recurring) == 1
+    assert recurring[0]["count"] == 2
+
+    assert client.get("/failure-modes?min_count=0").status_code == 422
+
+
+def test_failure_modes_can_filter_to_unpromoted_failures(client):
+    from test_api import create_job
+
+    job = create_job(client, cron=None, max_retries=0, payload={"fail_at": 2})
+    run = client.post(f"/jobs/{job['id']}/trigger").json()
+    execute_run(run["id"])
+
+    mode = client.get("/failure-modes").json()[0]
+    assert mode["promoted"] is False
+    assert len(client.get("/failure-modes?unpromoted_only=true").json()) == 1
+
+    client.post("/failure-modes/promote", json={"signature": mode["signature"]})
+
+    modes = client.get("/failure-modes").json()
+    assert modes[0]["promoted"] is True
+    assert client.get("/failure-modes?unpromoted_only=true").json() == []
+
+
 def test_eval_cli_passes_on_good_case(session):
     session.add(EvalCase(name="smoke", engine="offline", payload={}, min_score=0.9))
     session.commit()

@@ -63,6 +63,7 @@ def cluster_failures(
     job_id: str | None = None,
     limit_runs: int = 500,
     job_ids: list[str] | None = None,
+    min_count: int = 1,
 ) -> list[FailureMode]:
     """Group terminal failed runs by error signature, most frequent first.
 
@@ -94,4 +95,8 @@ def cluster_failures(
         if len(mode.sample_run_ids) < 5:
             mode.sample_run_ids.append(run.id)
 
-    return sorted(modes.values(), key=lambda m: m.count, reverse=True)
+    return sorted(
+        (m for m in modes.values() if m.count >= min_count),
+        key=lambda m: m.count,
+        reverse=True,
+    )

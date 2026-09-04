@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from pydantic import ValidationError as PydanticValidationError
@@ -153,6 +153,25 @@ def _jobs_stmt(tenant: Tenant | None):
 
 def _tenant_job_ids(session: Session, tenant: Tenant) -> list[str]:
     return list(session.scalars(select(Job.id).where(Job.tenant_id == tenant.id)))
+
+
+def _promoted_failure_signatures(session: Session, modes) -> set[str]:
+    signatures = {m.signature for m in modes}
+    job_ids = {job_id for m in modes for job_id in m.job_ids}
+    if not signatures:
+        return set()
+
+    stmt = select(EvalCase.source_signature, EvalCase.job_id).where(
+        EvalCase.source_signature.in_(signatures)
+    )
+    if job_ids:
+        stmt = stmt.where(or_(EvalCase.job_id.is_(None), EvalCase.job_id.in_(job_ids)))
+
+    promoted = set()
+    for signature, case_job_id in session.execute(stmt):
+        if case_job_id is None or case_job_id in job_ids:
+            promoted.add(signature)
+    return promoted
 
 
 def _latest_run_by_job(session: Session, job_ids: list[str]) -> dict[str, Run]:
@@ -645,6 +664,8 @@ def delete_lesson(
 @app.get("/failure-modes", response_model=list[FailureModeOut])
 def failure_modes(
     job_id: str | None = None,
+    min_count: int = Query(1, ge=1),
+    unpromoted_only: bool = False,
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> list[FailureModeOut]:
@@ -652,18 +673,23 @@ def failure_modes(
     if job_id is not None:
         _get_job(session, job_id, tenant)
     scope_ids = _tenant_job_ids(session, tenant) if tenant is not None else None
+    modes = cluster_failures(session, job_id=job_id, job_ids=scope_ids, min_count=min_count)
+    promoted = _promoted_failure_signatures(session, modes)
+    if unpromoted_only:
+        modes = [m for m in modes if m.signature not in promoted]
     return [
         FailureModeOut(
             signature=m.signature,
             summary=m.summary,
             count=m.count,
+            promoted=m.signature in promoted,
             job_ids=sorted(m.job_ids),
             first_seen=m.first_seen,
             last_seen=m.last_seen,
             sample_run_ids=m.sample_run_ids,
             latest_run_id=m.latest_run_id,
         )
-        for m in cluster_failures(session, job_id=job_id, job_ids=scope_ids)
+        for m in modes
     ]
 
 

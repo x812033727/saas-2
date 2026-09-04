@@ -187,6 +187,15 @@ def test_ui_exposes_job_scoped_failure_mode_controls(client):
     assert "Regression eval cases" in app_js
 
 
+def test_ui_exposes_failure_mode_filters(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert 'href="#/failures/recurring"' in app_js
+    assert 'href="#/failures/unpromoted"' in app_js
+    assert 'params.set("unpromoted_only", "true")' in app_js
+    assert "m.promoted" in app_js
+
+
 def test_ui_exposes_manual_eval_case_creation(client):
     app_js = client.get("/ui/app.js").text
     style_css = client.get("/ui/style.css").text
@@ -205,8 +214,12 @@ def test_ui_exposes_eval_gate_runner(client):
     style_css = client.get("/ui/style.css").text
 
     assert "data-runevals" in app_js
-    assert 'api("/eval-cases/run", { method: "POST", body: "{}" })' in app_js
+    assert 'data-runevals data-job="${esc(job.id)}"' in app_js
+    assert "const jobId = runEvalsBtn.dataset.job || null" in app_js
+    assert "const body = jobId ? { job_id: jobId } : {}" in app_js
+    assert 'api("/eval-cases/run", { method: "POST", body: JSON.stringify(body) })' in app_js
     assert "lastEvalSummary" in app_js
+    assert "lastEvalJobId" in app_js
     assert "Eval gate failed" in app_js
     assert ".eval-result" in style_css
 
