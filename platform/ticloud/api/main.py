@@ -754,6 +754,10 @@ def run_eval_cases(
     elif tenant is not None:
         stmt = stmt.where(EvalCase.job_id.in_(_tenant_job_ids(session, tenant)))
     cases = session.scalars(stmt).all()
+    if tenant is not None and cases and tenant_over_budget(session, tenant):
+        raise HTTPException(
+            402, f"tenant monthly budget (${tenant.monthly_budget_usd:.2f}) reached"
+        )
     return eval_cases_payload(session, cases, body.min_score)
 
 

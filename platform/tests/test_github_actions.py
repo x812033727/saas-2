@@ -12,6 +12,12 @@ def test_eval_gate_workflow_only_runs_eval_cases():
     assert 'python -m ticloud.eval.cli run --json --summary-file "$GITHUB_STEP_SUMMARY"' in workflow
 
 
+def test_ci_installs_billing_extra_for_billing_tests():
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+
+    assert 'pip install -e "platform[dev,billing]"' in workflow
+
+
 def test_composite_action_emits_json_and_github_summary():
     action = (ROOT / "action.yml").read_text()
 
