@@ -6,7 +6,7 @@ test via monkeypatch (both are read at request time).
 """
 
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, select, text
 
 from test_worker import run_job_once
 from ticloud.config import settings
@@ -359,6 +359,59 @@ def test_hosted_eval_case_run_is_tenant_scoped(client, hosted):
     assert (
         client.post("/eval-cases/run", json={"job_id": job_a["id"]}, headers=auth_b).status_code
         == 404
+    )
+
+
+def test_hosted_eval_jobs_stay_tenant_scoped_when_names_collide(client, hosted, session):
+    tenant_a, _, auth_a = _mint_tenant(client, "team-a")
+    tenant_b, _, auth_b = _mint_tenant(client, "team-b")
+    job_a = Job(
+        id="deadbeef" + ("a" * 24),
+        name="source-a",
+        tenant_id=tenant_a["id"],
+        engine="offline",
+        payload={},
+    )
+    job_b = Job(
+        id="deadbeef" + ("b" * 24),
+        name="source-b",
+        tenant_id=tenant_b["id"],
+        engine="offline",
+        payload={},
+    )
+    session.add_all([job_a, job_b])
+    session.commit()
+
+    assert (
+        client.post(
+            "/eval-cases",
+            json={"name": "smoke", "job_id": job_a.id},
+            headers=auth_a,
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
+            "/eval-cases",
+            json={"name": "smoke", "job_id": job_b.id},
+            headers=auth_b,
+        ).status_code
+        == 201
+    )
+
+    run_a = client.post("/eval-cases/run", json={}, headers=auth_a).json()["cases"][0]["run_id"]
+    run_b = client.post("/eval-cases/run", json={}, headers=auth_b).json()["cases"][0]["run_id"]
+
+    assert client.get(f"/runs/{run_a}", headers=auth_a).status_code == 200
+    assert client.get(f"/runs/{run_a}", headers=auth_b).status_code == 404
+    assert client.get(f"/runs/{run_b}", headers=auth_a).status_code == 404
+    assert client.get(f"/runs/{run_b}", headers=auth_b).status_code == 200
+
+    eval_jobs = session.scalars(
+        select(Job).where(Job.name == "eval:deadbeef:smoke")
+    ).all()
+    assert sorted(job.tenant_id for job in eval_jobs) == sorted(
+        [tenant_a["id"], tenant_b["id"]]
     )
 
 

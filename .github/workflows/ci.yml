@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
-        run: pip install -e "platform[dev]"
+        run: pip install -e "platform[dev,billing]"
       - name: Frontend syntax
         run: node --check platform/ticloud/web/app.js
       - name: Unit + integration tests

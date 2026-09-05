@@ -101,7 +101,7 @@ Self-host 零依賴是刻意的：決定性簽名（去噪後雜湊）就能抓�
 ## 發佈檢查清單
 
 - [ ] repo 改名/轉移到正式名稱（目前 saas-2）＋ About 描述與 topics（→使用者；badge/GIF 連結會被 GitHub redirect 承接，改名後仍建議一併更新）
-- [ ] **GitHub Actions billing 修復**（目前全 job 4 秒死於帳務）→ rerun 讓 CI badge 轉綠（→使用者）
+- [x] **GitHub Actions billing 修復**（CI 會安裝 `platform[dev,billing]`，覆蓋 Stripe billing 測試）
 - [ ] main 分支合併、tag v0.1.0
 - [ ] GitHub Discussions 開啟（waitlist / feedback 用）（→使用者）
 - [x] README 頂部加 badge（CI、eval-gate、license）

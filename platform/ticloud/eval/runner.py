@@ -1,6 +1,7 @@
 """Shared eval-case execution for CLI and API entrypoints."""
 
 from sqlalchemy import select
+from sqlalchemy.sql import ColumnElement
 from sqlalchemy.orm import Session
 
 from ..models import EvalCase, Job, Run
@@ -8,12 +9,16 @@ from ..scheduler.queue import enqueue_manual
 from ..scheduler.worker import execute_run
 
 
+def _tenant_filter(tenant_id: str | None) -> ColumnElement[bool]:
+    return Job.tenant_id == tenant_id if tenant_id is not None else Job.tenant_id.is_(None)
+
+
 def _eval_job(session: Session, case: EvalCase) -> Job:
     prefix = f"eval:{case.job_id[:8]}:" if case.job_id else "eval:"
     name = f"{prefix}{case.name[:200 - len(prefix)]}"
     source_job = session.get(Job, case.job_id) if case.job_id else None
     tenant_id = source_job.tenant_id if source_job is not None else None
-    job = session.scalar(select(Job).where(Job.name == name))
+    job = session.scalar(select(Job).where(Job.name == name, _tenant_filter(tenant_id)))
     if job is None:
         job = Job(
             name=name,

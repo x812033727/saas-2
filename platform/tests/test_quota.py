@@ -11,7 +11,7 @@ from test_worker import run_job_once
 from ticloud.billing import month_to_date_cost, tenant_over_budget
 from ticloud.config import settings
 from ticloud.db import get_session
-from ticloud.models import Alert, Job, Tenant
+from ticloud.models import Alert, Job, Run, Tenant
 from ticloud.scheduler.queue import claim_next_run, enqueue_due_jobs, enqueue_manual
 from ticloud.scheduler.worker import execute_run
 
@@ -92,6 +92,29 @@ def test_trigger_blocked_over_budget(client, hosted, session):
     resp = client.post(f"/jobs/{job['id']}/trigger", headers=auth)
     assert resp.status_code == 402
     assert "budget" in resp.json()["detail"]
+
+
+def test_eval_runner_blocked_over_budget(client, hosted, session):
+    tenant, auth = _mint_tenant(client, "acme")
+    client.put(
+        f"/admin/tenants/{tenant['id']}/budget", json={"monthly_budget_usd": 1.0}, headers=ADMIN
+    )
+    job = client.post("/jobs", json={"name": "j"}, headers=auth).json()
+    assert (
+        client.post(
+            "/eval-cases",
+            json={"name": "smoke", "job_id": job["id"]},
+            headers=auth,
+        ).status_code
+        == 201
+    )
+    _spend(session, job["id"], 1.5)
+
+    resp = client.post("/eval-cases/run", json={}, headers=auth)
+
+    assert resp.status_code == 402
+    assert "budget" in resp.json()["detail"]
+    assert session.query(Run).count() == 1
 
 
 def test_no_cap_never_blocks(client, hosted, session):
