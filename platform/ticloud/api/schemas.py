@@ -20,6 +20,19 @@ _NON_NULL_JOB_UPDATE_FIELDS = {
     "scorers",
 }
 
+_NON_NULL_EVAL_CASE_UPDATE_FIELDS = {
+    "name",
+    "engine",
+    "payload",
+    "min_score",
+    "enabled",
+}
+
+_NON_NULL_LESSON_UPDATE_FIELDS = {
+    "title",
+    "content",
+}
+
 
 def _validate_scorers_config(value: dict | None) -> dict | None:
     if value is None:
@@ -290,6 +303,26 @@ class LessonCreate(WriteModel):
         return v
 
 
+class LessonUpdate(WriteModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    content: str | None = Field(default=None, min_length=1, max_length=5000)
+    source_run_id: str | None = Field(default=None, min_length=1, max_length=32)
+
+    @field_validator("title", "content", "source_run_id", mode="before")
+    @classmethod
+    def _strip_outer_whitespace(cls, v: str | None) -> str | None:
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @model_validator(mode="after")
+    def _reject_null_required_fields(self) -> "LessonUpdate":
+        for field in _NON_NULL_LESSON_UPDATE_FIELDS & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
+
+
 class FailureModeOut(BaseModel):
     signature: str
     summary: str
@@ -343,7 +376,30 @@ class EvalCaseOut(BaseModel):
 
 
 class EvalCaseUpdate(WriteModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    engine: str | None = None
+    payload: dict | None = None
+    min_score: float | None = Field(default=None, ge=0, le=1)
     enabled: bool | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip_name(cls, v: str | None) -> str | None:
+        return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _reject_null_required_fields(self) -> "EvalCaseUpdate":
+        for field in _NON_NULL_EVAL_CASE_UPDATE_FIELDS & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
+
+    @field_validator("engine")
+    @classmethod
+    def _known_engine(cls, v: str | None) -> str | None:
+        if v is not None and v not in ENGINES:
+            raise ValueError(f"unknown engine {v!r}; available: {sorted(ENGINES)}")
+        return v
 
 
 class EvalRunRequest(WriteModel):

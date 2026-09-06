@@ -355,6 +355,11 @@ async function jobDetailView(id) {
             <span class="name"><strong>${esc(l.title)}</strong><br><small style="color:var(--ink-2)">${esc(l.content)}</small></span>
             <span class="meta">${relTime(l.updated_at)}</span>
             <button data-dellesson="${esc(l.id)}" data-job="${esc(job.id)}">Delete</button>
+            <form class="lessonedit" data-job="${esc(job.id)}" data-lesson="${esc(l.id)}">
+              <label>title <input name="title" required maxlength="200" value="${formValue(l.title)}"></label>
+              <label>content <textarea name="content" required maxlength="5000" rows="2">${esc(l.content)}</textarea></label>
+              <button type="submit">Update</button>
+            </form>
           </div>`).join("") : `<div class="empty">No lessons yet — add one after you fix a recurring issue.</div>`}
       </div>
       <form class="lessonform" id="lessonform">
@@ -470,6 +475,20 @@ async function jobDetailView(id) {
       render();
     } catch (e) { toast(e.message); }
   });
+
+  document.querySelectorAll(".lessonedit").forEach((form) => form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(form);
+    const body = {
+      title: String(f.get("title") || "").trim(),
+      content: String(f.get("content") || "").trim(),
+    };
+    try {
+      await api(`/jobs/${form.dataset.job}/lessons/${form.dataset.lesson}`, { method: "PATCH", body: JSON.stringify(body) });
+      toast("lesson updated");
+      render();
+    } catch (e) { toast(e.message); }
+  }));
 }
 
 function stepRow(s) {

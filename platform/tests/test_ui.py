@@ -154,9 +154,12 @@ def test_ui_exposes_manual_lesson_controls(client):
     app_js = client.get("/ui/app.js").text
 
     assert 'class="lessonform"' in app_js
+    assert 'class="lessonedit"' in app_js
     assert 'name="title"' in app_js
     assert 'name="content"' in app_js
     assert "`/jobs/${id}/lessons`" in app_js
+    assert 'method: "PATCH"' in app_js
+    assert "`/jobs/${form.dataset.job}/lessons/${form.dataset.lesson}`" in app_js
     assert "data-dellesson" in app_js
     assert "`/jobs/${lessonBtn.dataset.job}/lessons/${lessonBtn.dataset.dellesson}`" in app_js
 

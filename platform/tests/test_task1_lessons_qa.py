@@ -95,6 +95,115 @@ def test_qa_manual_lesson_foreign_source_update_is_atomic(client):
     ]
 
 
+def test_qa_manual_lesson_patch_updates_fields_and_can_clear_source_run(client):
+    job = create_job(client, name="qa-patch-lesson", cron=None)
+    source_run = client.post(f"/jobs/{job['id']}/trigger").json()
+    lesson = client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={
+            "title": "manual:old",
+            "content": "old content",
+            "source_run_id": source_run["id"],
+        },
+    ).json()
+
+    patched = client.patch(
+        f"/jobs/{job['id']}/lessons/{lesson['id']}",
+        json={"title": " manual:new ", "content": " clearer content ", "source_run_id": None},
+    )
+
+    assert patched.status_code == 200, patched.text
+    body = patched.json()
+    assert body["id"] == lesson["id"]
+    assert body["title"] == "manual:new"
+    assert body["content"] == "clearer content"
+    assert body["source_run_id"] is None
+
+
+def test_qa_manual_lesson_patch_rejects_duplicate_title_without_mutating(client):
+    job = create_job(client, name="qa-patch-duplicate", cron=None)
+    first = client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={"title": "manual:first", "content": "keep first"},
+    ).json()
+    second = client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={"title": "manual:second", "content": "keep second"},
+    ).json()
+
+    rejected = client.patch(
+        f"/jobs/{job['id']}/lessons/{second['id']}",
+        json={"title": first["title"], "content": "mutated"},
+    )
+
+    assert rejected.status_code == 409
+    lessons = client.get(f"/jobs/{job['id']}/lessons").json()
+    by_id = {lesson["id"]: lesson for lesson in lessons}
+    assert by_id[first["id"]]["content"] == "keep first"
+    assert by_id[second["id"]]["title"] == "manual:second"
+    assert by_id[second["id"]]["content"] == "keep second"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"title": None},
+        {"content": None},
+        {"title": "   "},
+        {"content": "   "},
+        {"source_run_id": "   "},
+        {"job_id": "wrong-place"},
+    ],
+)
+def test_qa_manual_lesson_patch_rejects_invalid_fields_without_mutating(client, body):
+    job = create_job(client, name="qa-invalid-patch-lesson", cron=None)
+    lesson = client.post(
+        f"/jobs/{job['id']}/lessons",
+        json={"title": "manual:stable", "content": "stable content"},
+    ).json()
+
+    rejected = client.patch(f"/jobs/{job['id']}/lessons/{lesson['id']}", json=body)
+
+    assert rejected.status_code == 422, (body, rejected.status_code, rejected.text)
+    lessons = client.get(f"/jobs/{job['id']}/lessons").json()
+    assert lessons == [
+        {
+            **lessons[0],
+            "id": lesson["id"],
+            "title": "manual:stable",
+            "content": "stable content",
+            "source_run_id": None,
+        }
+    ]
+
+
+def test_qa_manual_lesson_patch_foreign_source_update_is_atomic(client):
+    target = create_job(client, name="qa-patch-target", cron=None)
+    source = create_job(client, name="qa-patch-source", cron=None)
+    source_run = client.post(f"/jobs/{source['id']}/trigger").json()
+    lesson = client.post(
+        f"/jobs/{target['id']}/lessons",
+        json={"title": "manual:atomic-patch", "content": "original content"},
+    ).json()
+
+    rejected = client.patch(
+        f"/jobs/{target['id']}/lessons/{lesson['id']}",
+        json={"content": "mutated by rejected patch", "source_run_id": source_run["id"]},
+    )
+
+    assert rejected.status_code == 404
+    lessons = client.get(f"/jobs/{target['id']}/lessons").json()
+    assert lessons == [
+        {
+            **lessons[0],
+            "id": lesson["id"],
+            "title": "manual:atomic-patch",
+            "content": "original content",
+            "source_run_id": None,
+        }
+    ]
+
+
 def test_qa_manual_lesson_delete_is_job_scoped(client):
     owner = create_job(client, name="qa-owner", cron=None)
     other = create_job(client, name="qa-other", cron=None)

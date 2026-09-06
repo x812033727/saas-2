@@ -353,6 +353,53 @@ def test_eval_case_can_be_disabled_via_api(client, session):
     assert session.scalars(select(Job).where(Job.name == "eval:off-switch")).first() is not None
 
 
+def test_eval_case_can_be_edited_via_api(client, session):
+    case = client.post(
+        "/eval-cases",
+        json={"name": "still-broken", "payload": {"fail_at": 1}, "min_score": 0.9},
+    ).json()
+
+    resp = client.patch(
+        f"/eval-cases/{case['id']}",
+        json={"name": "  smoke  ", "payload": {}, "min_score": 0.5, "enabled": False},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["name"] == "smoke"
+    assert body["payload"] == {}
+    assert body["min_score"] == 0.5
+    assert body["enabled"] is False
+
+    session.expire_all()
+    stored = session.get(EvalCase, case["id"])
+    assert stored.name == "smoke"
+    assert stored.payload == {}
+    assert stored.min_score == 0.5
+    assert stored.enabled is False
+
+
+def test_eval_case_patch_rejects_conflicts_nulls_and_bad_values(client):
+    first = client.post("/eval-cases", json={"name": "first", "payload": {}}).json()
+    second = client.post("/eval-cases", json={"name": "second", "payload": {}}).json()
+
+    conflict = client.patch(f"/eval-cases/{second['id']}", json={"name": " first "})
+    assert conflict.status_code == 409
+
+    invalid_cases = [
+        {"name": "   "},
+        {"engine": "warp-drive"},
+        {"engine": None},
+        {"payload": None},
+        {"min_score": None},
+        {"min_score": 1.1},
+        {"enabled": None},
+    ]
+    for payload in invalid_cases:
+        resp = client.patch(f"/eval-cases/{first['id']}", json=payload)
+        assert resp.status_code == 422, (payload, resp.text)
+
+
 def test_eval_case_rejects_unknown_source_job(client):
     resp = client.post("/eval-cases", json={"name": "orphan", "job_id": "missing"})
     assert resp.status_code == 404
