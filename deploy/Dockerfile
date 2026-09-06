@@ -2,6 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 COPY platform/pyproject.toml platform/pyproject.toml
+COPY platform/README.md platform/README.md
 COPY platform/ticloud platform/ticloud
 RUN pip install --no-cache-dir -e "./platform[postgres]"
 

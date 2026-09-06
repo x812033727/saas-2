@@ -1,0 +1,8 @@
+**
+!deploy/
+!deploy/Dockerfile
+!platform/
+!platform/pyproject.toml
+!platform/README.md
+!platform/ticloud/
+!platform/ticloud/**
