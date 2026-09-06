@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from pydantic import ValidationError as PydanticValidationError
@@ -58,6 +59,7 @@ from .schemas import (
     JobWithLastRun,
     LessonCreate,
     LessonOut,
+    LessonUpdate,
     PromoteRequest,
     RunDetailOut,
     RunOut,
@@ -106,8 +108,13 @@ log = logging.getLogger(__name__)
 
 
 @app.get("/health")
-def health() -> dict:
-    return {"status": "ok", "version": __version__}
+def health(session: Session = Depends(db)) -> dict:
+    try:
+        session.execute(select(1)).scalar_one()
+    except SQLAlchemyError:
+        log.exception("health check database ping failed")
+        raise HTTPException(503, "database unavailable")
+    return {"status": "ok", "version": __version__, "database": "ok"}
 
 
 @app.get("/metrics", include_in_schema=False)
@@ -646,6 +653,40 @@ def create_lesson(
     return lesson
 
 
+@app.patch("/jobs/{job_id}/lessons/{lesson_id}", response_model=LessonOut)
+def update_lesson(
+    job_id: str,
+    lesson_id: str,
+    body: LessonUpdate,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> Lesson:
+    job = _get_job(session, job_id, tenant)
+    lesson = session.scalar(select(Lesson).where(Lesson.id == lesson_id, Lesson.job_id == job.id))
+    if lesson is None:
+        raise HTTPException(404, "lesson not found")
+
+    changes = body.model_dump(exclude_unset=True)
+    if "source_run_id" in changes:
+        _validate_lesson_source_run(session, job, changes["source_run_id"])
+    if "title" in changes and changes["title"] != lesson.title:
+        duplicate = session.scalar(
+            select(Lesson).where(
+                Lesson.job_id == job.id,
+                Lesson.title == changes["title"],
+                Lesson.id != lesson.id,
+            )
+        )
+        if duplicate is not None:
+            raise HTTPException(409, f"lesson titled {changes['title']!r} already exists")
+
+    for field, value in changes.items():
+        setattr(lesson, field, value)
+    lesson.updated_at = utcnow()
+    session.commit()
+    return lesson
+
+
 @app.delete("/jobs/{job_id}/lessons/{lesson_id}", status_code=204)
 def delete_lesson(
     job_id: str,
@@ -761,8 +802,12 @@ def run_eval_cases(
     return eval_cases_payload(session, cases, body.min_score)
 
 
-def _eval_case_name_exists(session: Session, name: str, tenant: Tenant | None) -> bool:
+def _eval_case_name_exists(
+    session: Session, name: str, tenant: Tenant | None, exclude_id: str | None = None
+) -> bool:
     stmt = select(EvalCase).where(EvalCase.name == name)
+    if exclude_id is not None:
+        stmt = stmt.where(EvalCase.id != exclude_id)
     if tenant is not None:
         stmt = stmt.where(EvalCase.job_id.in_(_tenant_job_ids(session, tenant)))
     return session.scalar(stmt) is not None
@@ -807,7 +852,11 @@ def update_eval_case(
     tenant: Tenant | None = Depends(current_tenant),
 ) -> EvalCase:
     case = _get_eval_case(session, case_id, tenant)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    if "name" in changes and changes["name"] != case.name:
+        if _eval_case_name_exists(session, changes["name"], tenant, exclude_id=case.id):
+            raise HTTPException(409, f"eval case named {changes['name']!r} already exists")
+    for field, value in changes.items():
         setattr(case, field, value)
     session.commit()
     return case

@@ -136,7 +136,11 @@ def run(base_url: str | None = None) -> SmokeSummary:
     from .models import Alert, Job, Lesson
     from .templates import TEMPLATES
 
-    status = health().get("status")
+    health_session = get_session()
+    try:
+        status = health(health_session).get("status")
+    finally:
+        health_session.close()
     if status != "ok":
         _fail(f"health check returned {status!r}")
     if not TEMPLATES:

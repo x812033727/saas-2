@@ -153,11 +153,26 @@ def test_hosted_lessons_are_tenant_scoped(client, hosted):
     assert [l["id"] for l in client.get(f"/jobs/{job['id']}/lessons", headers=auth_a).json()] == [
         lesson["id"]
     ]
+    patched = client.patch(
+        f"/jobs/{job['id']}/lessons/{lesson['id']}",
+        json={"content": "Keep the updated deployment note."},
+        headers=auth_a,
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["content"] == "Keep the updated deployment note."
     assert client.get(f"/jobs/{job['id']}/lessons", headers=auth_b).status_code == 404
     assert (
         client.post(
             f"/jobs/{job['id']}/lessons",
             json={"title": "manual:ops", "content": "foreign edit"},
+            headers=auth_b,
+        ).status_code
+        == 404
+    )
+    assert (
+        client.patch(
+            f"/jobs/{job['id']}/lessons/{lesson['id']}",
+            json={"content": "foreign patch"},
             headers=auth_b,
         ).status_code
         == 404
@@ -437,10 +452,12 @@ def test_hosted_eval_case_patch_is_tenant_scoped(client, hosted):
     assert invalid.status_code == 422
     updated = client.patch(
         f"/eval-cases/{case['id']}",
-        json={"enabled": False},
+        json={"enabled": False, "min_score": 0.7, "payload": {"fail_at": 0}},
         headers=auth_a,
     ).json()
     assert updated["enabled"] is False
+    assert updated["min_score"] == 0.7
+    assert updated["payload"] == {"fail_at": 0}
 
 
 def test_usage_metering_per_tenant(client, hosted, session):

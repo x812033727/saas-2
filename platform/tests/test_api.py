@@ -1,3 +1,6 @@
+from sqlalchemy.exc import SQLAlchemyError
+
+from ticloud.api.main import app, db
 from ticloud.scheduler.worker import execute_run
 
 
@@ -10,7 +13,27 @@ def create_job(client, **overrides):
 
 
 def test_health(client):
-    assert client.get("/health").json()["status"] == "ok"
+    body = client.get("/health").json()
+    assert body["status"] == "ok"
+    assert body["database"] == "ok"
+
+
+def test_health_returns_503_when_database_ping_fails(client):
+    class BrokenSession:
+        def execute(self, _stmt):
+            raise SQLAlchemyError("down")
+
+    def broken_db():
+        yield BrokenSession()
+
+    app.dependency_overrides[db] = broken_db
+    try:
+        resp = client.get("/health")
+    finally:
+        app.dependency_overrides.pop(db, None)
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "database unavailable"
 
 
 def test_create_job_computes_schedule(client):
