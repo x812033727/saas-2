@@ -150,6 +150,31 @@ def test_ui_exposes_template_job_creation(client):
     assert ".template-list" in style_css
 
 
+def test_ui_custom_job_creation_exposes_core_guard_fields(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert 'name="max_retries"' in app_js
+    assert 'name="retry_backoff_s"' in app_js
+    assert 'name="webhook_url"' in app_js
+    assert 'body.max_retries = Number(f.get("max_retries"))' in app_js
+    assert 'body.retry_backoff_s = Number(f.get("retry_backoff_s"))' in app_js
+    assert 'if (webhookUrl) body.webhook_url = webhookUrl' in app_js
+
+
+def test_ui_exposes_custom_job_payload_editor(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert "function parseJsonObject(raw, label)" in app_js
+    assert '<textarea name="payload" rows="4" placeholder=' in app_js
+    assert '${esc(JSON.stringify(job.payload || {}, null, 2))}' in app_js
+    assert 'payload = parseJsonObject(f.get("payload"), "payload")' in app_js
+    assert 'const body = { name: f.get("name"), engine: f.get("engine"), payload }' in app_js
+    assert "form.newjob textarea" in style_css
+    assert "form.jobsettings textarea" in style_css
+    assert "form.newjob label.wide" in style_css
+
+
 def test_ui_exposes_manual_lesson_controls(client):
     app_js = client.get("/ui/app.js").text
 
@@ -206,10 +231,26 @@ def test_ui_exposes_manual_eval_case_creation(client):
     assert 'api("/jobs").catch(() => [])' in app_js
     assert 'class="evalcase"' in app_js
     assert 'name="payload"' in app_js
-    assert 'payload = JSON.parse(String(f.get("payload") || "{}").trim() || "{}")' in app_js
+    assert 'payload = parseJsonObject(f.get("payload"), "payload")' in app_js
     assert 'await api("/eval-cases", { method: "POST", body: JSON.stringify(body) })' in app_js
     assert "if (jobId) body.job_id = jobId" in app_js
     assert "form.evalcase" in style_css
+
+
+def test_ui_exposes_eval_case_editor(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert "function evalCaseRows(c)" in app_js
+    assert 'class="evalcase-edit"' in app_js
+    assert 'data-case="${esc(c.id)}"' in app_js
+    assert 'api(`/eval-cases/${form.dataset.case}`, {' in app_js
+    assert 'method: "PATCH"' in app_js
+    assert 'enabled: f.get("enabled") === "on"' in app_js
+    assert "cases.map(evalCaseRows).join" in app_js
+    assert "jobCases.map(evalCaseRows).join" in app_js
+    assert "form.evalcase-edit" in style_css
+    assert "tr.case-edit-row td" in style_css
 
 
 def test_ui_exposes_eval_gate_runner(client):

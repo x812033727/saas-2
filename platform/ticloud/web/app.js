@@ -46,6 +46,18 @@ const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
 const fmtMoney = (v) => `$${(v ?? 0).toFixed(4)}`;
 const formValue = (v) => esc(v ?? "");
 
+function parseJsonObject(raw, label) {
+  const text = String(raw || "").trim();
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") throw new Error("not object");
+    return parsed;
+  } catch {
+    throw new Error(`${label} must be a JSON object`);
+  }
+}
+
 function duration(start, end) {
   if (!start) return "—";
   const s = ((end ? new Date(end) : new Date()) - new Date(start)) / 1000;
@@ -89,6 +101,35 @@ function templateForm(t) {
         <button class="primary submit" type="submit">Create</button>
       </form>
     </section>`;
+}
+
+function evalCaseRows(c) {
+  const source = c.source_signature
+    ? `<code style="font-size:12px">${esc(c.source_signature)}</code>`
+    : '<span style="color:var(--muted)">manual</span>';
+  return `
+    <tr>
+      <td><strong>${esc(c.name)}</strong>${c.enabled ? "" : ' <small style="color:var(--muted)">(disabled)</small>'}</td>
+      <td>${esc(c.engine)}</td>
+      <td class="num">${fmtScore(c.min_score)}</td>
+      <td>${source}</td>
+      <td class="actions">
+        <button data-togglecase="${esc(c.id)}" data-enabled="${c.enabled ? "false" : "true"}">${c.enabled ? "Disable" : "Enable"}</button>
+        <button data-delcase="${esc(c.id)}">Delete</button>
+      </td>
+    </tr>
+    <tr class="case-edit-row">
+      <td colspan="5">
+        <form class="evalcase-edit" data-case="${esc(c.id)}">
+          <label>name <input name="name" required value="${formValue(c.name)}"></label>
+          <label>engine <select name="engine"><option ${c.engine === "offline" ? "selected" : ""}>offline</option><option ${c.engine === "ti" ? "selected" : ""}>ti</option></select></label>
+          <label>min score <input name="min_score" type="number" step="0.05" min="0" max="1" value="${formValue(c.min_score)}"></label>
+          <label class="checkrow"><input name="enabled" type="checkbox" ${c.enabled ? "checked" : ""}> enabled</label>
+          <label class="wide">payload JSON <textarea name="payload" rows="3" spellcheck="false">${esc(JSON.stringify(c.payload || {}, null, 2))}</textarea></label>
+          <button class="primary submit" type="submit">Update eval case</button>
+        </form>
+      </td>
+    </tr>`;
 }
 
 function toast(msg) {
@@ -199,6 +240,7 @@ function jobSettingsForm(job) {
           <label>name <input name="name" required value="${formValue(job.name)}"></label>
           <label>cron (optional) <input name="cron" placeholder="0 2 * * *" value="${formValue(job.cron)}"></label>
           <label>interval seconds (optional) <input name="interval_seconds" type="number" min="10" value="${formValue(job.interval_seconds)}"></label>
+          <label class="wide">payload JSON <textarea name="payload" rows="4">${esc(JSON.stringify(job.payload || {}, null, 2))}</textarea></label>
           <label>budget USD <input name="budget_usd" type="number" step="0.01" min="0.01" value="${formValue(job.budget_usd)}"></label>
           <label>timeout s <input name="timeout_s" type="number" min="1" value="${formValue(job.timeout_s)}"></label>
           <label>max retries <input name="max_retries" type="number" min="0" value="${formValue(job.max_retries)}"></label>
@@ -261,10 +303,14 @@ async function jobsView() {
           <label>engine <select name="engine"><option>offline</option><option>ti</option></select></label>
           <label>cron (optional) <input name="cron" placeholder="0 2 * * *"></label>
           <label>interval seconds (optional) <input name="interval_seconds" type="number" min="10" placeholder="3600"></label>
+          <label class="wide">payload JSON <textarea name="payload" rows="4" placeholder='{"repo_url":"https://github.com/org/repo"}'></textarea></label>
           <label>budget USD <input name="budget_usd" type="number" step="0.01" value="5.0"></label>
           <label>timeout s <input name="timeout_s" type="number" value="1800"></label>
+          <label>max retries <input name="max_retries" type="number" min="0" value="2"></label>
+          <label>retry backoff s <input name="retry_backoff_s" type="number" min="0" value="0"></label>
           <label>quality gate (0–1, optional) <input name="score_threshold" type="number" step="0.05" min="0" max="1" placeholder="0.7"></label>
           <label>on low score <select name="on_low_score"><option>alert</option><option>pause</option></select></label>
+          <label>webhook URL (optional) <input name="webhook_url" type="url" placeholder="https://hooks.slack.com/..."></label>
           <label class="checkrow"><input name="approval_required" type="checkbox"> approval required</label>
           <button class="primary submit" type="submit">Create job</button>
         </form>
@@ -274,13 +320,20 @@ async function jobsView() {
   document.getElementById("newjob").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    const body = { name: f.get("name"), engine: f.get("engine"), payload: {} };
+    let payload;
+    try { payload = parseJsonObject(f.get("payload"), "payload"); }
+    catch (e) { toast(e.message); return; }
+    const body = { name: f.get("name"), engine: f.get("engine"), payload };
     if (f.get("cron")) body.cron = f.get("cron");
     if (f.get("interval_seconds")) body.interval_seconds = Number(f.get("interval_seconds"));
     body.budget_usd = Number(f.get("budget_usd"));
     body.timeout_s = Number(f.get("timeout_s"));
+    body.max_retries = Number(f.get("max_retries"));
+    body.retry_backoff_s = Number(f.get("retry_backoff_s"));
     if (f.get("score_threshold")) body.score_threshold = Number(f.get("score_threshold"));
     body.on_low_score = f.get("on_low_score");
+    const webhookUrl = String(f.get("webhook_url") || "").trim();
+    if (webhookUrl) body.webhook_url = webhookUrl;
     body.approval_required = f.get("approval_required") === "on";
     try { await api("/jobs", { method: "POST", body: JSON.stringify(body) }); toast("job created"); render(); }
     catch (e) { toast(e.message); }
@@ -393,17 +446,7 @@ async function jobDetailView(id) {
     <div class="card">
       ${jobCases.length ? `<table>
         <thead><tr><th>Name</th><th>Engine</th><th class="num">Min score</th><th>Source</th><th></th></tr></thead>
-        <tbody>${jobCases.map((c) => `
-          <tr>
-            <td><strong>${esc(c.name)}</strong>${c.enabled ? "" : ' <small style="color:var(--muted)">(disabled)</small>'}</td>
-            <td>${esc(c.engine)}</td>
-            <td class="num">${fmtScore(c.min_score)}</td>
-            <td>${c.source_signature ? `<code style="font-size:12px">${esc(c.source_signature)}</code>` : '<span style="color:var(--muted)">manual</span>'}</td>
-            <td class="actions">
-              <button data-togglecase="${c.id}" data-enabled="${c.enabled ? "false" : "true"}">${c.enabled ? "Disable" : "Enable"}</button>
-              <button data-delcase="${c.id}">Delete</button>
-            </td>
-          </tr>`).join("")}</tbody></table>`
+        <tbody>${jobCases.map(evalCaseRows).join("")}</tbody></table>`
         : `<div class="empty">No regression eval cases for this job yet.</div>`}
     </div>
     <h2>Quality score per run (last ${stats.length})</h2>
@@ -442,8 +485,12 @@ async function jobDetailView(id) {
       const value = String(f.get(name) || "").trim();
       return value ? Number(value) : null;
     };
+    let payload;
+    try { payload = parseJsonObject(f.get("payload"), "payload"); }
+    catch (e) { toast(e.message); return; }
     const body = {
       name: String(f.get("name") || "").trim(),
+      payload,
       cron: optionalText("cron"),
       interval_seconds: optionalNumber("interval_seconds"),
       budget_usd: Number(f.get("budget_usd")),
@@ -686,17 +733,7 @@ async function failuresView(filter = "all") {
         : `<button class="primary" data-promote="${esc(m.signature)}">Promote to eval case</button>`}</td>
     </tr>`).join("");
 
-  const caseRows = cases.map((c) => `
-    <tr>
-      <td><strong>${esc(c.name)}</strong>${c.enabled ? "" : ' <small style="color:var(--muted)">(disabled)</small>'}</td>
-      <td>${esc(c.engine)}</td>
-      <td class="num">${fmtScore(c.min_score)}</td>
-      <td>${c.source_signature ? `<code style="font-size:12px">${esc(c.source_signature)}</code>` : '<span style="color:var(--muted)">manual</span>'}</td>
-      <td class="actions">
-        <button data-togglecase="${c.id}" data-enabled="${c.enabled ? "false" : "true"}">${c.enabled ? "Disable" : "Enable"}</button>
-        <button data-delcase="${c.id}">Delete</button>
-      </td>
-    </tr>`).join("");
+  const caseRows = cases.map(evalCaseRows).join("");
   const evalResult = lastEvalJobId === null ? evalResultCard(lastEvalSummary) : "";
 
   app.innerHTML = `
@@ -740,13 +777,9 @@ async function failuresView(filter = "all") {
   document.getElementById("evalcase").addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    let payload = {};
-    try {
-      payload = JSON.parse(String(f.get("payload") || "{}").trim() || "{}");
-    } catch {
-      toast("payload must be valid JSON");
-      return;
-    }
+    let payload;
+    try { payload = parseJsonObject(f.get("payload"), "payload"); }
+    catch (e) { toast(e.message); return; }
     const body = {
       name: String(f.get("name") || "").trim(),
       engine: f.get("engine"),
@@ -841,6 +874,27 @@ async function render() {
     schedulePoll(4000);
   }
 }
+
+app.addEventListener("submit", (ev) => {
+  const form = ev.target.closest("form.evalcase-edit");
+  if (!form) return;
+  ev.preventDefault();
+  const f = new FormData(form);
+  let payload;
+  try { payload = parseJsonObject(f.get("payload"), "payload"); }
+  catch (e) { toast(e.message); return; }
+  const body = {
+    name: String(f.get("name") || "").trim(),
+    engine: f.get("engine"),
+    min_score: Number(f.get("min_score")),
+    payload,
+    enabled: f.get("enabled") === "on",
+  };
+  api(`/eval-cases/${form.dataset.case}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  }).then(() => { clearEvalResult(); toast("eval case updated"); render(); }).catch((e) => toast(e.message));
+});
 
 app.addEventListener("click", (ev) => {
   const ackBtn = ev.target.closest("button[data-ack]");
