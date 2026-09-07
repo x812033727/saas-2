@@ -489,6 +489,11 @@ class TenantBudget(WriteModel):
 class TenantPlan(WriteModel):
     plan: str = Field(min_length=1, max_length=50)
 
+    @field_validator("plan", mode="before")
+    @classmethod
+    def _strip_plan(cls, v: str) -> str:
+        return v.strip() if isinstance(v, str) else v
+
 
 class ApiKeyCreate(WriteModel):
     name: str = Field(default="default", min_length=1, max_length=200)

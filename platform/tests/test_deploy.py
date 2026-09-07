@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -73,3 +74,18 @@ def test_dockerignore_keeps_build_context_minimal():
     assert "!platform/ticloud/**" in dockerignore
     assert "!.venv" not in dockerignore
     assert "!platform/tests/**" not in dockerignore
+
+
+def test_api_module_entrypoint_exposes_server_help():
+    result = subprocess.run(
+        [sys.executable, "-m", "ticloud.api", "--help"],
+        cwd=ROOT / "platform",
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Run the Ti Cloud API and dashboard." in result.stdout
+    assert "--port" in result.stdout

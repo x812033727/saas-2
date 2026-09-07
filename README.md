@@ -219,14 +219,15 @@ reports the cap, month-to-date spend, and an `over_budget` flag.
 
 ### Stripe billing (optional)
 
-A **plan** is a named spend cap (`stripe_billing.PLAN_BUDGETS` —
-placeholders: `free` $5, `team` $200, `pro` unlimited; tune to your
-pricing). Stripe subscription webhooks keep each tenant's plan and cap in
-sync:
+A **plan** is a named spend cap. Defaults are `free` $5, `team` $200,
+and `pro` unlimited; override them with `TICLOUD_STRIPE_PLAN_BUDGETS`
+JSON in production. Stripe subscription webhooks keep each tenant's plan
+and cap in sync:
 
 ```bash
 pip install -e "platform[billing]"          # the Stripe SDK
 export TICLOUD_STRIPE_WEBHOOK_SECRET=whsec_… # verifies webhook signatures
+export TICLOUD_STRIPE_PLAN_BUDGETS='{"free": 10, "team": 500, "pro": null}'
 ```
 
 Point a Stripe webhook at `POST /billing/stripe/webhook`. On
@@ -252,6 +253,13 @@ docs/PLAN.md   product plan & roadmap (zh-TW); docs/LAUNCH.md launch notes
 ```
 
 ## Operating it
+
+Run the API and dashboard:
+
+```bash
+cd platform
+TICLOUD_DATABASE_URL=sqlite:///./dev.db python -m ticloud.api --host 127.0.0.1 --port 8000
+```
 
 `GET /metrics` is Prometheus exposition (queue depth, oldest queued/running
 run age, runs by status, jobs, unacknowledged alerts, cumulative

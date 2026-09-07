@@ -133,7 +133,11 @@ def build_job_fields(template: dict, name: str, cron: str | None, payload_overri
     for key in _JOB_FIELDS:
         if key in template:
             fields[key] = template[key]
-    fields["payload"] = {**template.get("payload", {}), **payload_overrides}
+    payload = {**template.get("payload", {}), **payload_overrides}
+    for key in template.get("required_payload", []):
+        if isinstance(payload.get(key), str):
+            payload[key] = payload[key].strip()
+    fields["payload"] = payload
     if cron is not None:
         fields["cron"] = cron
         fields["interval_seconds"] = None
