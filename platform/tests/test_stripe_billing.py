@@ -75,6 +75,46 @@ def test_checkout_completed_activates_plan_and_budget(client, admin_mode, sessio
     assert row.stripe_customer_id == "cus_123"
 
 
+def test_checkout_metadata_plan_is_trimmed(client, admin_mode, session):
+    t = _tenant(client)
+    resp = _post(
+        client,
+        _event(
+            "checkout.session.completed",
+            {
+                "client_reference_id": t["id"],
+                "customer": "cus_trim",
+                "metadata": {"plan": " team "},
+            },
+        ),
+    )
+
+    row = session.get(Tenant, t["id"])
+    assert resp.status_code == 200
+    assert resp.json()["result"] == "activated:team"
+    assert row.plan == "team"
+    assert row.monthly_budget_usd == stripe_billing.PLAN_BUDGETS["team"]
+
+
+def test_blank_metadata_plan_uses_default_plan(client, admin_mode, session):
+    t = _tenant(client)
+    _post(
+        client,
+        _event(
+            "checkout.session.completed",
+            {
+                "client_reference_id": t["id"],
+                "customer": "cus_blank",
+                "metadata": {"plan": "   "},
+            },
+        ),
+    )
+
+    row = session.get(Tenant, t["id"])
+    assert row.plan == stripe_billing.DEFAULT_PLAN
+    assert row.monthly_budget_usd == stripe_billing.PLAN_BUDGETS[stripe_billing.DEFAULT_PLAN]
+
+
 def test_pro_plan_is_unlimited(client, admin_mode, session):
     t = _tenant(client)
     _post(
@@ -242,6 +282,27 @@ def test_admin_set_plan_applies_budget(client, admin_mode, session):
 
     bad = client.put(f"/admin/tenants/{t['id']}/plan", json={"plan": "nope"}, headers=ADMIN)
     assert bad.status_code == 422
+
+
+def test_admin_set_plan_uses_configured_plan_budgets(client, admin_mode, session, monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "stripe_plan_budgets",
+        {"free": 2.0, "growth": 750.0, "enterprise": None},
+    )
+    t = _tenant(client)
+
+    resp = client.put(
+        f"/admin/tenants/{t['id']}/plan",
+        json={"plan": " growth "},
+        headers=ADMIN,
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["plan"] == "growth"
+    assert body["monthly_budget_usd"] == 750.0
+    assert session.get(Tenant, t["id"]).monthly_budget_usd == 750.0
 
 
 def test_plan_budget_enforced_end_to_end(client, admin_mode, session, monkeypatch):

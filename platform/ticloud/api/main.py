@@ -1158,9 +1158,10 @@ def set_tenant_plan(
     """Manually set a tenant's plan (comp accounts / when not using Stripe).
 
     Applies the plan's budget, same as a subscription event would."""
-    if body.plan not in stripe_billing.PLAN_BUDGETS:
+    plans = stripe_billing.known_plans()
+    if body.plan not in plans:
         raise HTTPException(
-            422, f"unknown plan {body.plan!r}; known: {sorted(stripe_billing.PLAN_BUDGETS)}"
+            422, f"unknown plan {body.plan!r}; known: {sorted(plans)}"
         )
     tenant = _get_tenant(session, tenant_id)
     stripe_billing.apply_plan(tenant, body.plan, "active")

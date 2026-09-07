@@ -9,9 +9,9 @@ configured webhook secret, the endpoint parses events unverified — fine for
 local testing, NOT for production (a real deployment must set
 ``TICLOUD_STRIPE_WEBHOOK_SECRET`` so signatures are checked).
 
-Plan → monthly USD cap. These are **placeholders** — set real numbers to
-match your pricing (PLAN.md sketches Free / Team ~$59 / Pro). ``None`` = no
-cap (unlimited).
+Plan → monthly USD cap defaults are placeholders; set
+``TICLOUD_STRIPE_PLAN_BUDGETS`` in production to match pricing. ``None`` =
+no cap (unlimited).
 """
 
 import json
@@ -20,18 +20,14 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .config import settings
+from .config import DEFAULT_STRIPE_PLAN_BUDGETS, settings
 from .models import Tenant
 
 log = logging.getLogger(__name__)
 
-# Placeholder budgets — tune to your pricing. free is a trial-sized cap so an
-# unpaid tenant can try the product but can't run unbounded spend.
-PLAN_BUDGETS: dict[str, float | None] = {
-    "free": 5.0,
-    "team": 200.0,
-    "pro": None,  # unlimited
-}
+# Public default map kept for tests/docs; runtime values come from settings so
+# deployments can tune caps without editing code.
+PLAN_BUDGETS = DEFAULT_STRIPE_PLAN_BUDGETS
 DEFAULT_PLAN = "free"
 
 # Subscription statuses Stripe considers "the customer is paying".
@@ -71,7 +67,12 @@ def parse_event(payload: bytes, sig_header: str | None) -> dict:
 
 
 def budget_for_plan(plan: str) -> float | None:
-    return PLAN_BUDGETS.get(plan, PLAN_BUDGETS[DEFAULT_PLAN])
+    budgets = settings.stripe_plan_budgets
+    return budgets.get(plan, budgets[DEFAULT_PLAN])
+
+
+def known_plans() -> set[str]:
+    return set(settings.stripe_plan_budgets)
 
 
 def apply_plan(tenant: Tenant, plan: str, status: str) -> None:
@@ -91,7 +92,10 @@ def _plan_from_object(obj: dict) -> str:
     The app is expected to stamp `metadata.plan` on the Checkout session and
     subscription (a price→plan lookup is the alternative, left as config)."""
     meta = obj.get("metadata") or {}
-    return meta.get("plan") or DEFAULT_PLAN
+    plan = meta.get("plan")
+    if not isinstance(plan, str):
+        return DEFAULT_PLAN
+    return plan.strip() or DEFAULT_PLAN
 
 
 def _tenant_by_customer(session: Session, customer_id: str | None) -> Tenant | None:

@@ -6,6 +6,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from .validation import validate_webhook_url as _validate_webhook_url
 
 
+DEFAULT_STRIPE_PLAN_BUDGETS: dict[str, float | None] = {
+    "free": 5.0,
+    "team": 200.0,
+    "pro": None,
+}
+
+
 class Settings(BaseSettings):
     """Platform configuration, overridable via TICLOUD_* env vars."""
 
@@ -54,6 +61,12 @@ class Settings(BaseSettings):
     # create Checkout sessions (not needed to receive webhooks).
     stripe_secret_key: str | None = None
     stripe_webhook_secret: str | None = None
+    # JSON env override, e.g.
+    # TICLOUD_STRIPE_PLAN_BUDGETS='{"free": 10, "team": 500, "pro": null}'
+    # None means unlimited. Unknown Stripe plan names still fall back to free.
+    stripe_plan_budgets: dict[str, float | None] = Field(
+        default_factory=lambda: DEFAULT_STRIPE_PLAN_BUDGETS.copy()
+    )
 
     @field_validator("auth_mode", mode="before")
     @classmethod
@@ -66,6 +79,25 @@ class Settings(BaseSettings):
     @classmethod
     def validate_webhook_url(cls, value: str | None) -> str | None:
         return _validate_webhook_url(value)
+
+    @field_validator("stripe_plan_budgets")
+    @classmethod
+    def validate_stripe_plan_budgets(
+        cls, value: dict[str, float | None]
+    ) -> dict[str, float | None]:
+        normalized: dict[str, float | None] = {}
+        for plan, budget in value.items():
+            plan = plan.strip()
+            if not plan:
+                raise ValueError("stripe plan names must be non-empty")
+            if plan in normalized:
+                raise ValueError("stripe plan names must be unique after trimming")
+            if budget is not None and budget < 0:
+                raise ValueError("stripe plan budgets must be non-negative")
+            normalized[plan] = budget
+        if "free" not in normalized:
+            raise ValueError("stripe_plan_budgets must include a free plan")
+        return normalized
 
 
 settings = Settings()

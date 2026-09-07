@@ -26,6 +26,19 @@ def test_from_template_merges_defaults_and_overrides(session, client):
     assert job["next_run_at"] is not None  # scheduled
 
 
+def test_from_template_trims_required_payload_strings(session, client):
+    r = client.post(
+        "/jobs/from-template/nightly-repo-patrol",
+        json={
+            "name": "my-patrol",
+            "payload": {"repo_url": "  https://github.com/me/repo.git  "},
+        },
+    )
+
+    assert r.status_code == 201, r.text
+    assert r.json()["payload"]["repo_url"] == "https://github.com/me/repo.git"
+
+
 def test_from_template_cron_override(session, client):
     r = client.post(
         "/jobs/from-template/nightly-repo-patrol",
@@ -81,5 +94,7 @@ def test_build_job_fields_unit():
     assert fields["payload"]["extra"] == "e"
     assert fields["payload"]["brief"]  # merged over skeleton
     assert templates.missing_required(tpl, fields["payload"]) == []
+    trimmed = templates.build_job_fields(tpl, "n", None, {"repo_url": "  r  "})
+    assert trimmed["payload"]["repo_url"] == "r"
     assert templates.missing_required(tpl, {"repo_url": ""}) == ["repo_url"]
     assert templates.missing_required(tpl, {"repo_url": "   "}) == ["repo_url"]
