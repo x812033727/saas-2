@@ -210,17 +210,17 @@ button:disabled:hover {
 .eval-result-head span { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 
 /* Compact edit forms */
-form.newjob, form.jobsettings, form.lessonform, form.lessonedit, form.templatejob, form.evalcase { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-form.newjob label, form.jobsettings label, form.lessonform label, form.lessonedit label, form.templatejob label, form.evalcase label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
-form.newjob label.checkrow, form.jobsettings label.checkrow {
+form.newjob, form.jobsettings, form.lessonform, form.lessonedit, form.templatejob, form.evalcase, form.evalcase-edit { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+form.newjob label, form.jobsettings label, form.lessonform label, form.lessonedit label, form.templatejob label, form.evalcase label, form.evalcase-edit label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+form.newjob label.checkrow, form.jobsettings label.checkrow, form.evalcase-edit label.checkrow {
   flex-direction: row;
   align-items: center;
   align-self: end;
   min-height: 32px;
   color: var(--ink-2);
 }
-form.newjob label.checkrow input, form.jobsettings label.checkrow input { width: auto; }
-form.newjob input, form.newjob select, form.jobsettings input, form.jobsettings select, form.lessonform input, form.lessonform textarea, form.lessonedit input, form.lessonedit textarea, form.templatejob input, form.evalcase input, form.evalcase select, form.evalcase textarea {
+form.newjob label.checkrow input, form.jobsettings label.checkrow input, form.evalcase-edit label.checkrow input { width: auto; }
+form.newjob input, form.newjob select, form.newjob textarea, form.jobsettings input, form.jobsettings select, form.jobsettings textarea, form.lessonform input, form.lessonform textarea, form.lessonedit input, form.lessonedit textarea, form.templatejob input, form.evalcase input, form.evalcase select, form.evalcase textarea, form.evalcase-edit input, form.evalcase-edit select, form.evalcase-edit textarea {
   font: inherit;
   font-size: 14px;
   padding: 5px 8px;
@@ -229,14 +229,15 @@ form.newjob input, form.newjob select, form.jobsettings input, form.jobsettings 
   background: var(--surface);
   color: var(--ink);
 }
-form.lessonform textarea, form.lessonedit textarea, form.evalcase textarea { resize: vertical; min-height: 76px; }
-form.evalcase label.wide { grid-column: 1 / -1; }
-form.newjob label.checkrow input, form.jobsettings label.checkrow input {
+form.newjob textarea, form.jobsettings textarea, form.lessonform textarea, form.lessonedit textarea, form.evalcase textarea, form.evalcase-edit textarea { resize: vertical; min-height: 76px; }
+form.newjob label.wide, form.jobsettings label.wide, form.evalcase label.wide, form.evalcase-edit label.wide { grid-column: 1 / -1; }
+form.newjob label.checkrow input, form.jobsettings label.checkrow input, form.evalcase-edit label.checkrow input {
   width: auto;
   padding: 0;
   border-radius: 3px;
 }
-form.newjob .submit, form.jobsettings .submit, form.lessonform .submit, form.lessonedit button, form.templatejob .submit, form.evalcase .submit { align-self: end; }
+form.newjob .submit, form.jobsettings .submit, form.lessonform .submit, form.lessonedit button, form.templatejob .submit, form.evalcase .submit, form.evalcase-edit .submit { align-self: end; }
+tr.case-edit-row td { padding-top: 0; border-top: none; }
 form.lessonform { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--grid); }
 form.lessonedit {
   grid-column: 1 / -1;
