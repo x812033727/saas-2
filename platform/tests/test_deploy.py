@@ -27,7 +27,7 @@ def test_compose_api_has_http_healthcheck():
     assert "  api:\n" in compose
     api_section = compose.split("  api:\n", 1)[1].split("  worker:\n", 1)[0]
     assert "healthcheck:" in api_section
-    assert "http://127.0.0.1:8000/health" in api_section
+    assert "http://127.0.0.1:8000/ready" in api_section
     assert "urllib.request" in api_section
     assert "start_period: 5s" in api_section
 
@@ -51,15 +51,15 @@ def test_compose_file_is_valid_for_docker_compose():
     assert "dockerfile: deploy/Dockerfile" in result.stdout
     assert 'published: "8000"' in result.stdout
     assert "target: 8000" in result.stdout
-    assert "http://127.0.0.1:8000/health" in result.stdout
+    assert "http://127.0.0.1:8000/ready" in result.stdout
 
 
 def test_compose_api_healthcheck_is_bounded_and_status_strict():
     compose = (ROOT / "deploy/docker-compose.yml").read_text()
     api_section = compose.split("  api:\n", 1)[1].split("  worker:\n", 1)[0]
 
-    assert "urlopen('http://127.0.0.1:8000/health', timeout=2)" in api_section
-    assert "['status'] == 'ok'" in api_section
+    assert "urlopen('http://127.0.0.1:8000/ready', timeout=2)" in api_section
+    assert "['status'] == 'ready'" in api_section
     assert "timeout: 3s" in api_section
     assert "retries: 20" in api_section
 

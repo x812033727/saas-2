@@ -44,6 +44,7 @@ def test_launch_smoke_seeds_demo_and_checks_operational_surfaces():
     summary = run()
 
     assert summary.health_status == "ok"
+    assert summary.ready_status == "ready"
     assert summary.jobs == 3
     assert summary.alerts > 0
     assert summary.lessons > 0
@@ -57,6 +58,8 @@ def test_launch_smoke_can_check_running_http_surfaces(monkeypatch):
         calls.append((base_url, path))
         if path == "/health":
             return json.dumps({"status": "ok"})
+        if path == "/ready":
+            return json.dumps({"status": "ready"})
         if path == "/templates":
             return json.dumps([{"id": "demo-workshop"}])
         if path == "/overview":
@@ -84,6 +87,7 @@ def test_launch_smoke_can_check_running_http_surfaces(monkeypatch):
     assert summary.http_base_url == "http://127.0.0.1:8000/"
     assert calls == [
         ("http://127.0.0.1:8000/", "/health"),
+        ("http://127.0.0.1:8000/", "/ready"),
         ("http://127.0.0.1:8000/", "/templates"),
         ("http://127.0.0.1:8000/", "/overview"),
         ("http://127.0.0.1:8000/", "/metrics"),

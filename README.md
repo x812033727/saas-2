@@ -261,9 +261,11 @@ cd platform
 TICLOUD_DATABASE_URL=sqlite:///./dev.db python -m ticloud.api --host 127.0.0.1 --port 8000
 ```
 
-`GET /metrics` is Prometheus exposition (queue depth, oldest queued/running
-run age, runs by status, jobs, unacknowledged alerts, cumulative
-spend/tokens) — point a scraper at it.
+`GET /health` and `GET /ready` both verify the API can reach its database;
+use `/ready` for orchestrator readiness probes. `GET /metrics` is
+Prometheus exposition (queue depth, oldest queued/running run age, runs by
+status, jobs, unacknowledged alerts, cumulative spend/tokens) — point a
+scraper at it.
 Set `TICLOUD_LOG_JSON=1` for one-JSON-object-per-line logs (with run/job
 ids) instead of plain text.
 
@@ -280,8 +282,8 @@ TICLOUD_DATABASE_URL=sqlite:///./smoke.db TICLOUD_SMOKE_BASE_URL=http://127.0.0.
 
 The smoke check requires an explicit `TICLOUD_DATABASE_URL` so it never seeds
 the default local dev database by accident. Add `TICLOUD_SMOKE_BASE_URL` after
-starting the API to also verify `/health`, `/templates`, `/overview`, and
-`/metrics` over HTTP.
+starting the API to also verify `/health`, `/ready`, `/templates`,
+`/overview`, and `/metrics` over HTTP.
 
 ## Roadmap
 
