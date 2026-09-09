@@ -107,14 +107,24 @@ current_tenant = make_current_tenant(db)
 log = logging.getLogger(__name__)
 
 
-@app.get("/health")
-def health(session: Session = Depends(db)) -> dict:
+def _assert_database_ready(session: Session) -> None:
     try:
         session.execute(select(1)).scalar_one()
     except SQLAlchemyError:
         log.exception("health check database ping failed")
         raise HTTPException(503, "database unavailable")
+
+
+@app.get("/health")
+def health(session: Session = Depends(db)) -> dict:
+    _assert_database_ready(session)
     return {"status": "ok", "version": __version__, "database": "ok"}
+
+
+@app.get("/ready")
+def ready(session: Session = Depends(db)) -> dict:
+    _assert_database_ready(session)
+    return {"status": "ready", "version": __version__, "database": "ok"}
 
 
 @app.get("/metrics", include_in_schema=False)

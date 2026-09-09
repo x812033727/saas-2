@@ -30,6 +30,7 @@ class SmokeSummary:
     alerts: int
     lessons: int
     health_status: str
+    ready_status: str
     http_base_url: str | None = None
 
 
@@ -104,6 +105,10 @@ def _check_http_surfaces(base_url: str, expected_names: set[str]) -> None:
     if health_payload.get("status") != "ok":
         _fail(f"HTTP health returned {health_payload!r}")
 
+    ready_payload = _http_json(base_url, "/ready")
+    if ready_payload.get("status") != "ready":
+        _fail(f"HTTP ready returned {ready_payload!r}")
+
     templates_payload = _http_json(base_url, "/templates")
     if not isinstance(templates_payload, list) or not templates_payload:
         _fail("HTTP templates did not return any job templates")
@@ -129,7 +134,7 @@ def run(base_url: str | None = None) -> SmokeSummary:
 
     from sqlalchemy import select
 
-    from .api.main import health
+    from .api.main import health, ready
     from .db import get_session
     from .demo import DEMO_JOBS, seed
     from .metrics import render_metrics
@@ -138,11 +143,14 @@ def run(base_url: str | None = None) -> SmokeSummary:
 
     health_session = get_session()
     try:
-        status = health(health_session).get("status")
+        health_status = health(health_session).get("status")
+        ready_status = ready(health_session).get("status")
     finally:
         health_session.close()
-    if status != "ok":
-        _fail(f"health check returned {status!r}")
+    if health_status != "ok":
+        _fail(f"health check returned {health_status!r}")
+    if ready_status != "ready":
+        _fail(f"ready check returned {ready_status!r}")
     if not TEMPLATES:
         _fail("no job templates registered")
 
@@ -181,7 +189,8 @@ def run(base_url: str | None = None) -> SmokeSummary:
             jobs=len(jobs),
             alerts=alerts,
             lessons=lessons,
-            health_status=status,
+            health_status=health_status,
+            ready_status=ready_status,
             http_base_url=http_base_url,
         )
     finally:

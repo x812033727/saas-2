@@ -36,6 +36,30 @@ def test_health_returns_503_when_database_ping_fails(client):
     assert resp.json()["detail"] == "database unavailable"
 
 
+def test_ready(client):
+    body = client.get("/ready").json()
+    assert body["status"] == "ready"
+    assert body["database"] == "ok"
+
+
+def test_ready_returns_503_when_database_ping_fails(client):
+    class BrokenSession:
+        def execute(self, _stmt):
+            raise SQLAlchemyError("down")
+
+    def broken_db():
+        yield BrokenSession()
+
+    app.dependency_overrides[db] = broken_db
+    try:
+        resp = client.get("/ready")
+    finally:
+        app.dependency_overrides.pop(db, None)
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "database unavailable"
+
+
 def test_create_job_computes_schedule(client):
     job = create_job(client)
     assert job["next_run_at"] is not None
