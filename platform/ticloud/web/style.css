@@ -149,6 +149,11 @@ td.attention { min-width: 118px; }
   border-color: color-mix(in oklab, var(--warning) 55%, var(--border));
   color: var(--ink-2);
 }
+.attention-pill.stale {
+  border-color: color-mix(in oklab, var(--serious) 55%, var(--border));
+  color: var(--serious);
+}
+td .attention-pill.stale { margin-top: 4px; }
 
 /* Status badges: reserved status palette, always icon + label, never color alone. */
 .badge {

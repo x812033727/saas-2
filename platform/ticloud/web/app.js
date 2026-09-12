@@ -222,11 +222,28 @@ const fmtScore = (v) => (v == null ? "—" : v.toFixed(2));
 function attentionSummary(job) {
   const alerts = Number(job.unacknowledged_alerts || 0);
   const approvals = Number(job.awaiting_approval_runs || 0);
-  if (!alerts && !approvals) return `<span class="muted">—</span>`;
+  const stale = Number(job.stale_running_runs || 0);
+  if (!alerts && !approvals && !stale) return `<span class="muted">—</span>`;
   return `<div class="attention-stack">
     ${alerts ? `<a class="attention-pill alert" href="#/alerts/open/${encodeURIComponent(job.id)}">${alerts} alert${alerts === 1 ? "" : "s"}</a>` : ""}
     ${approvals ? `<a class="attention-pill approval" href="#/approvals">${approvals} approval${approvals === 1 ? "" : "s"}</a>` : ""}
+    ${stale ? `<a class="attention-pill stale" href="#/jobs/${encodeURIComponent(job.id)}">${stale} stuck running</a>` : ""}
   </div>`;
+}
+
+const STALE_RUNNING_GRACE_S = 5;
+
+function isStaleRunning(run, job) {
+  if (run.status !== "running") return false;
+  const anchor = run.started_at || run.scheduled_at;
+  if (!anchor) return false;
+  return (Date.now() - new Date(anchor)) / 1000 > Number(job.timeout_s || 0) + STALE_RUNNING_GRACE_S;
+}
+
+function runHistoryActions(run) {
+  const canCancel = !TERMINAL_RUN_STATUSES.has(run.status) && run.status !== "awaiting_approval";
+  if (!canCancel) return `<span class="muted">—</span>`;
+  return `<button data-runact="cancel" data-id="${esc(run.id)}" ${run.cancel_requested ? "disabled" : ""}>${run.cancel_requested ? "Cancel requested" : "Cancel"}</button>`;
 }
 
 /* ---------- views ---------- */
@@ -375,17 +392,21 @@ async function jobDetailView(id) {
   const jobCases = cases.filter((c) => c.job_id === id);
   const hasEnabledJobCases = jobCases.some((c) => c.enabled);
   const jobEvalResult = lastEvalJobId === id ? evalResultCard(lastEvalSummary) : "";
-  const rows = runs.map((r) => `
+  const rows = runs.map((r) => {
+    const stale = isStaleRunning(r, job);
+    const note = (r.error || "").split("\n").pop() || (r.result && r.result.summary) || "";
+    return `
     <tr class="rowlink" data-href="#/runs/${r.id}">
-      <td>${badge(r.status)}</td>
+      <td>${badge(r.status)}${stale ? '<br><span class="attention-pill stale">stuck running</span>' : ""}</td>
       <td class="num">${r.attempt}</td>
       <td>${esc(fmtTime(r.scheduled_at))}<br><small style="color:var(--muted)">${relTime(r.scheduled_at)}</small></td>
       <td class="num">${duration(r.started_at, r.finished_at)}</td>
       <td class="num">${fmtScore(r.score)}</td>
       <td class="num">${fmtMoney(r.cost_usd)}</td>
-      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">
-        ${esc((r.error || "").split("\n").pop() || (r.result && r.result.summary) || "")}</td>
-    </tr>`).join("");
+      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)">${esc(note)}</td>
+      <td class="actions" data-noclick>${runHistoryActions(r)}</td>
+    </tr>`;
+  }).join("");
 
   app.innerHTML = `
     <div class="crumb"><a href="#/jobs">Jobs</a> / ${esc(job.name)}</div>
@@ -465,7 +486,7 @@ async function jobDetailView(id) {
     <h2>Run history</h2>
     <div class="card">
       ${runs.length ? `<table>
-        <thead><tr><th>Status</th><th class="num">Attempt</th><th>Scheduled</th><th class="num">Duration</th><th class="num">Score</th><th class="num">Cost</th><th>Note</th></tr></thead>
+        <thead><tr><th>Status</th><th class="num">Attempt</th><th>Scheduled</th><th class="num">Duration</th><th class="num">Score</th><th class="num">Cost</th><th>Note</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table>`
       : `<div class="empty">No runs yet — trigger one from the jobs list.</div>`}
     </div>
