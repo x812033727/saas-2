@@ -23,7 +23,12 @@ from ..db import SessionLocal, init_db
 from ..eval.failures import cluster_failures
 from ..eval.runner import eval_cases_payload
 from ..config import settings
-from ..metrics import configure_logging, render_metrics
+from ..metrics import (
+    configure_logging,
+    render_metrics,
+    stale_running_counts_by_job,
+    stale_running_run_ids,
+)
 from ..models import (
     TERMINAL_STATUSES,
     Alert,
@@ -305,6 +310,7 @@ def overview(
     recent_stats = _recent_stats_by_job(session, job_ids)
     alert_counts = _unacknowledged_alert_counts_by_job(session, job_ids)
     approval_counts = _awaiting_approval_counts_by_job(session, job_ids)
+    stale_counts = stale_running_counts_by_job(session, job_ids)
     out = []
     for job in jobs:
         item = JobWithLastRun.model_validate(job)
@@ -313,6 +319,7 @@ def overview(
         item.recent_stats = recent_stats.get(job.id, [])
         item.unacknowledged_alerts = alert_counts.get(job.id, 0)
         item.awaiting_approval_runs = approval_counts.get(job.id, 0)
+        item.stale_running_runs = stale_counts.get(job.id, 0)
         out.append(item)
     return out
 
@@ -506,13 +513,26 @@ def list_runs(
     job_id: str,
     limit: int = Query(50, ge=1, le=200),
     cursor: str | None = None,
+    status: RunStatus | None = None,
+    stale: bool = False,
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> list[Run]:
     """Newest first. Paginate with `cursor` = the last row's
-    "<scheduled_at>|<id>" (keyset, so new rows don't shift pages)."""
+    "<scheduled_at>|<id>" (keyset, so new rows don't shift pages).
+
+    `status` narrows to one lifecycle state; `stale=true` narrows to
+    RUNNING runs older than the job timeout plus worker grace.
+    """
     _get_job(session, job_id, tenant)
     stmt = select(Run).where(Run.job_id == job_id)
+    if status is not None:
+        stmt = stmt.where(Run.status == status)
+    if stale:
+        run_ids = stale_running_run_ids(session, [job_id])
+        if not run_ids:
+            return []
+        stmt = stmt.where(Run.id.in_(run_ids))
     keyset = _keyset_before(Run.scheduled_at, Run.id, cursor)
     if keyset is not None:
         stmt = stmt.where(keyset)

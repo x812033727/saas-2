@@ -189,6 +189,50 @@ def test_runs_keyset_pagination(session, client):
     assert all(r["scheduled_at"] <= last["scheduled_at"] for r in page2)  # strictly older
 
 
+def test_runs_can_filter_by_status_and_stale_running(session, client):
+    job = make_job(session, timeout_s=30)
+    other = make_job(session, name="other-job", timeout_s=30)
+    now = datetime.now(timezone.utc)
+    stale = Run(
+        job_id=job.id,
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=80),
+        started_at=now - timedelta(seconds=80),
+    )
+    fresh = Run(
+        job_id=job.id,
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=10),
+        started_at=now - timedelta(seconds=10),
+    )
+    failed = Run(
+        job_id=job.id,
+        status=RunStatus.FAILED,
+        scheduled_at=now - timedelta(seconds=5),
+    )
+    other_stale = Run(
+        job_id=other.id,
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=80),
+        started_at=now - timedelta(seconds=80),
+    )
+    session.add_all([stale, fresh, failed, other_stale])
+    session.commit()
+
+    running = client.get(f"/jobs/{job.id}/runs", params={"status": "running"}).json()
+    assert [r["id"] for r in running] == [fresh.id, stale.id]
+
+    stale_only = client.get(f"/jobs/{job.id}/runs", params={"stale": "true"}).json()
+    assert [r["id"] for r in stale_only] == [stale.id]
+
+    impossible = client.get(
+        f"/jobs/{job.id}/runs", params={"status": "failed", "stale": "true"}
+    ).json()
+    assert impossible == []
+    bad_status = client.get(f"/jobs/{job.id}/runs", params={"status": "not-a-status"})
+    assert bad_status.status_code == 422
+
+
 def test_bad_cursor_422(session, client):
     job = make_job(session)
     bad_cursors = [

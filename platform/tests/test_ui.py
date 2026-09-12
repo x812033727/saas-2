@@ -3,9 +3,11 @@ import socket
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.request import urlopen
 
+from ticloud.models import Run, RunStatus
 from ticloud.scheduler.worker import execute_run
 
 from test_api import create_job
@@ -282,6 +284,31 @@ def test_overview_includes_last_run(client):
     assert overview["second-job"]["last_run"] is None
 
 
+def test_overview_flags_stale_running_runs(client, session):
+    job = create_job(client, cron=None, timeout_s=10)
+    now = datetime.now(timezone.utc)
+    session.add(
+        Run(
+            job_id=job["id"],
+            status=RunStatus.RUNNING,
+            scheduled_at=now - timedelta(seconds=20),
+            started_at=now - timedelta(seconds=16),
+        )
+    )
+    session.add(
+        Run(
+            job_id=job["id"],
+            status=RunStatus.RUNNING,
+            scheduled_at=now - timedelta(seconds=5),
+            started_at=now - timedelta(seconds=5),
+        )
+    )
+    session.commit()
+
+    overview = client.get("/overview").json()[0]
+    assert overview["stale_running_runs"] == 1
+
+
 def test_jobs_view_uses_overview_recent_stats(client):
     app_js = client.get("/ui/app.js").text
     style_css = client.get("/ui/style.css").text
@@ -299,10 +326,25 @@ def test_jobs_view_uses_overview_attention_counts(client):
     assert "function attentionSummary(job)" in app_js
     assert "job.unacknowledged_alerts" in app_js
     assert "job.awaiting_approval_runs" in app_js
+    assert "job.stale_running_runs" in app_js
     assert "<th>Needs action</th>" in app_js
     assert 'class="attention" data-noclick' in app_js
     assert ".attention-pill.alert" in style_css
     assert ".attention-pill.approval" in style_css
+    assert ".attention-pill.stale" in style_css
+
+
+def test_job_detail_flags_and_cancels_stale_running_runs(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert "function isStaleRunning(run, job)" in app_js
+    assert "const STALE_RUNNING_GRACE_S = 5" in app_js
+    assert "stuck running" in app_js
+    assert "function runHistoryActions(run)" in app_js
+    assert 'data-runact="cancel"' in app_js
+    assert "<th>Note</th><th></th>" in app_js
+    assert "td .attention-pill.stale" in style_css
 
 
 def test_job_stats_series(client):

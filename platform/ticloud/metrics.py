@@ -15,11 +15,68 @@ from sqlalchemy.orm import Session
 
 from .models import Alert, Job, Run, RunStatus
 
+STALE_RUNNING_GRACE_S = 5
+
 
 def _age_seconds(now: datetime, then: datetime | None) -> float:
     if then is None:
         return 0.0
     return round(max(0.0, (now - then).total_seconds()), 3)
+
+
+def _is_stale_running(
+    started_at: datetime | None,
+    scheduled_at: datetime,
+    timeout_s: int,
+    now: datetime,
+) -> bool:
+    anchor = started_at or scheduled_at
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    return (now - anchor).total_seconds() > timeout_s + STALE_RUNNING_GRACE_S
+
+
+def _stale_running_rows(
+    session: Session,
+    job_ids: list[str] | None = None,
+    now: datetime | None = None,
+):
+    if job_ids is not None and not job_ids:
+        return
+    now = now or datetime.now(timezone.utc)
+    stmt = (
+        select(Run.id, Run.job_id, Run.started_at, Run.scheduled_at, Job.timeout_s)
+        .join(Job, Run.job_id == Job.id)
+        .where(Run.status == RunStatus.RUNNING)
+    )
+    if job_ids is not None:
+        stmt = stmt.where(Run.job_id.in_(job_ids))
+    for run_id, job_id, started_at, scheduled_at, timeout_s in session.execute(stmt):
+        if _is_stale_running(started_at, scheduled_at, timeout_s, now):
+            yield run_id, job_id
+
+
+def stale_running_counts_by_job(
+    session: Session,
+    job_ids: list[str] | None = None,
+    now: datetime | None = None,
+) -> dict[str, int]:
+    """Running runs older than their job timeout plus a small worker grace."""
+    if job_ids is not None and not job_ids:
+        return {}
+    counts = {job_id: 0 for job_id in job_ids or []}
+    for _, job_id in _stale_running_rows(session, job_ids, now):
+        counts[job_id] = counts.get(job_id, 0) + 1
+    return counts
+
+
+def stale_running_run_ids(
+    session: Session,
+    job_ids: list[str] | None = None,
+    now: datetime | None = None,
+) -> set[str]:
+    """IDs for stale running runs, optionally narrowed to specific jobs."""
+    return {run_id for run_id, _ in _stale_running_rows(session, job_ids, now)}
 
 
 def render_metrics(session: Session) -> str:
@@ -75,6 +132,12 @@ def render_metrics(session: Session) -> str:
                 ),
             )
         ],
+    )
+    metric(
+        "ticloud_stale_running_runs",
+        "Running runs older than their job timeout plus a short worker grace period.",
+        "gauge",
+        [("", sum(stale_running_counts_by_job(session, now=now).values()))],
     )
 
     # Jobs by paused state.

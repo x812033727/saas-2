@@ -37,7 +37,7 @@ def test_metrics_endpoint_exposition(session, client):
 
 
 def test_metrics_exposes_stuck_queue_and_running_ages(session, client):
-    job = make_job(session)
+    job = make_job(session, timeout_s=30)
     now = datetime.now(timezone.utc)
     session.add(
         Run(
@@ -59,6 +59,7 @@ def test_metrics_exposes_stuck_queue_and_running_ages(session, client):
     body = client.get("/metrics").text
     assert _metric_value(body, "ticloud_oldest_queued_run_age_seconds") >= 90
     assert _metric_value(body, "ticloud_oldest_running_run_age_seconds") >= 45
+    assert "ticloud_stale_running_runs 1" in body
 
 
 def test_metrics_empty_db(client):
@@ -66,6 +67,7 @@ def test_metrics_empty_db(client):
     assert 'ticloud_runs_total{status="running"} 0' in body
     assert "ticloud_oldest_queued_run_age_seconds 0.0" in body
     assert "ticloud_oldest_running_run_age_seconds 0.0" in body
+    assert "ticloud_stale_running_runs 0" in body
     assert "ticloud_cost_usd_total 0" in body
 
 

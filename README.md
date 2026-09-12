@@ -257,8 +257,8 @@ docs/PLAN.md   product plan & roadmap (zh-TW); docs/LAUNCH.md launch notes
 Run the API and dashboard:
 
 ```bash
-cd platform
-TICLOUD_DATABASE_URL=sqlite:///./dev.db python -m ticloud.api --host 127.0.0.1 --port 8000
+# From the repository root; serves the dashboard at http://localhost:8010/ui/.
+TICLOUD_DATABASE_URL=sqlite:///./platform/dev.db .venv/bin/python -m ticloud.api --host 127.0.0.1 --port 8010
 ```
 
 `GET /health` and `GET /ready` both verify the API can reach its database;
@@ -266,6 +266,8 @@ use `/ready` for orchestrator readiness probes. `GET /metrics` is
 Prometheus exposition (queue depth, oldest queued/running run age, runs by
 status, jobs, unacknowledged alerts, cumulative spend/tokens) — point a
 scraper at it.
+Job run history supports `?status=running` and `?stale=true` so automation can
+find stuck in-flight runs without scraping the dashboard.
 Set `TICLOUD_LOG_JSON=1` for one-JSON-object-per-line logs (with run/job
 ids) instead of plain text.
 

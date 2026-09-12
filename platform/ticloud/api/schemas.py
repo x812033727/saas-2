@@ -277,6 +277,7 @@ class JobWithLastRun(JobOut):
     recent_stats: list[RunStatPoint] = Field(default_factory=list)
     unacknowledged_alerts: int = 0
     awaiting_approval_runs: int = 0
+    stale_running_runs: int = 0
 
 
 class LessonOut(BaseModel):
