@@ -53,7 +53,7 @@ DEMO_JOBS = [
 ]
 
 
-def seed() -> int:
+def seed(dashboard_url: str = "http://localhost:8000/ui/") -> int:
     init_db()
     session = get_session()
     try:
@@ -86,7 +86,7 @@ def seed() -> int:
                     pending = claim_next_run(session)
             print(f"+ {spec['name']}: seeded with {len(job.runs)} run(s)")
 
-        print(f"\ndemo ready ({created} job(s) created) — open http://localhost:8000/ui/")
+        print(f"\ndemo ready ({created} job(s) created) — open {dashboard_url}")
         return 0
     finally:
         session.close()

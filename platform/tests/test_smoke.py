@@ -51,11 +51,17 @@ def test_launch_smoke_seeds_demo_and_checks_operational_surfaces():
     assert summary.http_base_url is None
 
 
-def test_launch_smoke_can_check_running_http_surfaces(monkeypatch):
+def test_launch_smoke_can_check_running_http_surfaces(monkeypatch, capsys):
     calls = []
 
     def fake_http_get(base_url, path):
         calls.append((base_url, path))
+        if path == "/ui/":
+            return '<title>Ti Cloud</title><main id="app"></main><script src="app.js"></script>'
+        if path == "/ui/app.js":
+            return "/* Ti Cloud dashboard */\nasync function api() {}\nasync function render() {}"
+        if path == "/ui/style.css":
+            return ":root {}\n.topbar {}\nmain {}"
         if path == "/health":
             return json.dumps({"status": "ok"})
         if path == "/ready":
@@ -82,16 +88,40 @@ def test_launch_smoke_can_check_running_http_surfaces(monkeypatch):
 
     monkeypatch.setattr(smoke, "_http_get", fake_http_get)
 
-    summary = run("http://127.0.0.1:8000")
+    summary = run("http://127.0.0.1:8010")
 
-    assert summary.http_base_url == "http://127.0.0.1:8000/"
+    captured = capsys.readouterr()
+    assert "open http://127.0.0.1:8010/ui/" in captured.out
+    assert "open http://localhost:8000/ui/" not in captured.out
+    assert summary.http_base_url == "http://127.0.0.1:8010/"
     assert calls == [
-        ("http://127.0.0.1:8000/", "/health"),
-        ("http://127.0.0.1:8000/", "/ready"),
-        ("http://127.0.0.1:8000/", "/templates"),
-        ("http://127.0.0.1:8000/", "/overview"),
-        ("http://127.0.0.1:8000/", "/metrics"),
+        ("http://127.0.0.1:8010/", "/health"),
+        ("http://127.0.0.1:8010/", "/ready"),
+        ("http://127.0.0.1:8010/", "/ui/"),
+        ("http://127.0.0.1:8010/", "/ui/app.js"),
+        ("http://127.0.0.1:8010/", "/ui/style.css"),
+        ("http://127.0.0.1:8010/", "/templates"),
+        ("http://127.0.0.1:8010/", "/overview"),
+        ("http://127.0.0.1:8010/", "/metrics"),
     ]
+
+
+def test_launch_smoke_reports_broken_dashboard_assets(monkeypatch):
+    def fake_http_get(base_url, path):
+        if path == "/health":
+            return json.dumps({"status": "ok"})
+        if path == "/ready":
+            return json.dumps({"status": "ready"})
+        if path == "/ui/":
+            return '<title>Ti Cloud</title><main id="app"></main><script src="app.js"></script>'
+        if path == "/ui/app.js":
+            return "/* Ti Cloud dashboard */\nasync function api() {}"
+        raise AssertionError(path)
+
+    monkeypatch.setattr(smoke, "_http_get", fake_http_get)
+
+    with pytest.raises(RuntimeError, match="HTTP dashboard JS missing async function render"):
+        smoke._check_http_surfaces("http://127.0.0.1:8000/", {"nightly-patrol"})
 
 
 def test_launch_smoke_base_url_can_come_from_env(monkeypatch):

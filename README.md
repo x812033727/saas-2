@@ -257,8 +257,8 @@ docs/PLAN.md   product plan & roadmap (zh-TW); docs/LAUNCH.md launch notes
 Run the API and dashboard:
 
 ```bash
-# From the repository root; serves the dashboard at http://localhost:8010/ui/.
-TICLOUD_DATABASE_URL=sqlite:///./platform/dev.db .venv/bin/python -m ticloud.api --host 127.0.0.1 --port 8010
+# From the repository root; seeds the demo and serves http://localhost:8010/ui/.
+TICLOUD_DATABASE_URL=sqlite:///./platform/dev.db .venv/bin/python -m ticloud.api --host 127.0.0.1 --port 8010 --seed-demo
 ```
 
 `GET /health` and `GET /ready` both verify the API can reach its database;
@@ -279,13 +279,15 @@ python -m ticloud.eval.cli run       # eval-set regression gate
 python -m ticloud.eval.cli run --json
 python -m ticloud.eval.cli run --summary-file "$GITHUB_STEP_SUMMARY"
 TICLOUD_DATABASE_URL=sqlite:///./smoke.db python -m ticloud.smoke
-TICLOUD_DATABASE_URL=sqlite:///./smoke.db TICLOUD_SMOKE_BASE_URL=http://127.0.0.1:8000 python -m ticloud.smoke
+TICLOUD_DATABASE_URL=sqlite:///./smoke.db python -m ticloud.smoke --base-url http://127.0.0.1:8010
 ```
 
 The smoke check requires an explicit `TICLOUD_DATABASE_URL` so it never seeds
-the default local dev database by accident. Add `TICLOUD_SMOKE_BASE_URL` after
-starting the API to also verify `/health`, `/ready`, `/templates`,
-`/overview`, and `/metrics` over HTTP.
+the default local dev database by accident. It is a verification command, not
+the long-running API server. Add `TICLOUD_SMOKE_BASE_URL` after starting the
+API, or pass `--base-url`, to also verify `/health`, `/ready`, the dashboard
+(`/ui/`, `/ui/app.js`, `/ui/style.css`), `/templates`, `/overview`, and
+`/metrics` over HTTP.
 
 ## Roadmap
 

@@ -1273,12 +1273,27 @@ if _web_dir.is_dir():  # pragma: no branch
     app.mount("/ui", StaticFiles(directory=_web_dir, html=True), name="ui")
 
 
+def _dashboard_url(host: str, port: int) -> str:
+    browser_host = "localhost" if host in {"0.0.0.0", "::"} else host
+    return f"http://{browser_host}:{port}/ui/"
+
+
 def _main() -> None:
     parser = argparse.ArgumentParser(description="Run the Ti Cloud API and dashboard.")
     parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
     parser.add_argument("--reload", action="store_true")
+    parser.add_argument(
+        "--seed-demo",
+        action="store_true",
+        help="Seed the zero-key demo jobs before serving the dashboard.",
+    )
     args = parser.parse_args()
+
+    if args.seed_demo:
+        from ..demo import seed
+
+        seed(dashboard_url=_dashboard_url(args.host, args.port))
 
     import uvicorn
 
