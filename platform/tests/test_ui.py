@@ -231,6 +231,11 @@ def test_ui_exposes_manual_eval_case_creation(client):
     style_css = client.get("/ui/style.css").text
 
     assert 'api("/jobs").catch(() => [])' in app_js
+    assert 'api("/usage").catch(() => null)' in app_js
+    assert "const hostedTenant = Boolean(usage && usage.tenant_id)" in app_js
+    assert "const globalEvalOption = hostedTenant ? \"\" : '<option value=\"\">global</option>'" in app_js
+    assert 'name="job_id" ${hostedTenant ? "required" : ""}' in app_js
+    assert '${canCreateEvalCase ? "" : "disabled"}' in app_js
     assert 'class="evalcase"' in app_js
     assert 'name="payload"' in app_js
     assert 'payload = parseJsonObject(f.get("payload"), "payload")' in app_js

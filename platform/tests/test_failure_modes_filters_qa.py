@@ -123,6 +123,59 @@ def test_qa_job_scoped_unpromoted_filter_does_not_hide_same_signature(client):
     assert missing_job.status_code == 404
 
 
+def test_qa_unscoped_shared_mode_requires_all_jobs_promoted(client):
+    job_a = _create_job(client, name="qa-unscoped-shared-a", payload={"fail_at": 3})
+    job_b = _create_job(client, name="qa-unscoped-shared-b", payload={"fail_at": 3})
+    _trigger_failures(client, job_a["id"])
+    _trigger_failures(client, job_b["id"])
+
+    mode = client.get("/failure-modes").json()[0]
+    assert set(mode["job_ids"]) == {job_a["id"], job_b["id"]}
+
+    promoted_a = client.post(
+        "/failure-modes/promote",
+        json={"signature": mode["signature"], "job_id": job_a["id"]},
+    )
+    assert promoted_a.status_code == 201, promoted_a.text
+
+    partial = client.get("/failure-modes").json()[0]
+    assert partial["promoted"] is False
+    still_needed = client.get("/failure-modes?unpromoted_only=true").json()
+    assert [m["signature"] for m in still_needed] == [mode["signature"]]
+
+    promoted_b = client.post(
+        "/failure-modes/promote",
+        json={"signature": mode["signature"], "job_id": job_b["id"]},
+    )
+    assert promoted_b.status_code == 201, promoted_b.text
+
+    complete = client.get("/failure-modes").json()[0]
+    assert complete["promoted"] is True
+    assert client.get("/failure-modes?unpromoted_only=true").json() == []
+
+
+def test_qa_unscoped_shared_promote_advances_to_uncovered_jobs(client):
+    job_a = _create_job(client, name="qa-unscoped-next-a", payload={"fail_at": 3})
+    job_b = _create_job(client, name="qa-unscoped-next-b", payload={"fail_at": 3})
+    _trigger_failures(client, job_a["id"])
+    _trigger_failures(client, job_b["id"])
+
+    mode = client.get("/failure-modes").json()[0]
+    assert set(mode["job_ids"]) == {job_a["id"], job_b["id"]}
+
+    first = client.post("/failure-modes/promote", json={"signature": mode["signature"]})
+    assert first.status_code == 201, first.text
+    assert client.get("/failure-modes").json()[0]["promoted"] is False
+
+    second = client.post("/failure-modes/promote", json={"signature": mode["signature"]})
+    assert second.status_code == 201, second.text
+    assert {first.json()["job_id"], second.json()["job_id"]} == {job_a["id"], job_b["id"]}
+
+    assert client.get("/failure-modes").json()[0]["promoted"] is True
+    third = client.post("/failure-modes/promote", json={"signature": mode["signature"]})
+    assert third.status_code == 409
+
+
 def test_qa_hosted_unpromoted_filter_is_tenant_scoped(client, hosted):
     auth_a = _mint_tenant(client, "qa-team-a")
     auth_b = _mint_tenant(client, "qa-team-b")
