@@ -2,6 +2,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import types
 from pathlib import Path
 
 import pytest
@@ -89,3 +90,44 @@ def test_api_module_entrypoint_exposes_server_help():
     assert result.returncode == 0, result.stderr
     assert "Run the Ti Cloud API and dashboard." in result.stdout
     assert "--port" in result.stdout
+    assert "--seed-demo" in result.stdout
+
+
+def test_api_module_entrypoint_can_seed_demo_before_serving(monkeypatch):
+    from ticloud.api import main as api_main
+    from ticloud import demo
+
+    seed_calls = []
+    uvicorn_calls = []
+
+    def fake_seed(*, dashboard_url):
+        seed_calls.append(dashboard_url)
+        return 0
+
+    def fake_run(*args, **kwargs):
+        uvicorn_calls.append((args, kwargs))
+
+    monkeypatch.setattr(demo, "seed", fake_seed)
+    monkeypatch.setitem(sys.modules, "uvicorn", types.SimpleNamespace(run=fake_run))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "ticloud.api",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8010",
+            "--seed-demo",
+        ],
+    )
+
+    api_main._main()
+
+    assert seed_calls == ["http://127.0.0.1:8010/ui/"]
+    assert uvicorn_calls == [
+        (
+            ("ticloud.api.main:app",),
+            {"host": "127.0.0.1", "port": 8010, "reload": False},
+        )
+    ]

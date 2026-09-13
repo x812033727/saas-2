@@ -3,6 +3,10 @@
 Run with an isolated database URL, for example:
 
     TICLOUD_DATABASE_URL=sqlite:///./smoke.db python -m ticloud.smoke
+    TICLOUD_DATABASE_URL=sqlite:///./smoke.db python -m ticloud.smoke --base-url http://127.0.0.1:8010
+
+When --base-url is provided, start the API server first; this command verifies
+it and exits.
 
 The check intentionally stays inside the platform package and avoids test-only
 dependencies, so CI and release operators exercise the same code paths.
@@ -109,6 +113,21 @@ def _check_http_surfaces(base_url: str, expected_names: set[str]) -> None:
     if ready_payload.get("status") != "ready":
         _fail(f"HTTP ready returned {ready_payload!r}")
 
+    ui_html = _http_get(base_url, "/ui/")
+    for marker in ('<title>Ti Cloud</title>', 'id="app"', 'src="app.js"'):
+        if marker not in ui_html:
+            _fail(f"HTTP dashboard missing {marker}")
+
+    ui_js = _http_get(base_url, "/ui/app.js")
+    for marker in ("Ti Cloud dashboard", "async function api", "async function render"):
+        if marker not in ui_js:
+            _fail(f"HTTP dashboard JS missing {marker}")
+
+    ui_css = _http_get(base_url, "/ui/style.css")
+    for marker in (":root", ".topbar", "main {"):
+        if marker not in ui_css:
+            _fail(f"HTTP dashboard CSS missing {marker}")
+
     templates_payload = _http_json(base_url, "/templates")
     if not isinstance(templates_payload, list) or not templates_payload:
         _fail("HTTP templates did not return any job templates")
@@ -154,8 +173,11 @@ def run(base_url: str | None = None) -> SmokeSummary:
     if not TEMPLATES:
         _fail("no job templates registered")
 
-    seed()
-    seed()
+    dashboard_url = (
+        f"{http_base_url}ui/" if http_base_url is not None else "http://localhost:8000/ui/"
+    )
+    seed(dashboard_url=dashboard_url)
+    seed(dashboard_url=dashboard_url)
 
     session = get_session()
     try:
@@ -204,7 +226,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--base-url",
         default=None,
-        help="Optional running API base URL to verify over HTTP.",
+        help=(
+            "Optional running API base URL; verifies health, ready, dashboard "
+            "assets, templates, overview, and metrics over HTTP."
+        ),
     )
     args = parser.parse_args(argv)
 
