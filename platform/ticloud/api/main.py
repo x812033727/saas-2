@@ -178,8 +178,9 @@ def _tenant_job_ids(session: Session, tenant: Tenant) -> list[str]:
 
 
 def _promoted_failure_signatures(session: Session, modes) -> set[str]:
-    signatures = {m.signature for m in modes}
-    job_ids = {job_id for m in modes for job_id in m.job_ids}
+    jobs_by_signature = {m.signature: set(m.job_ids) for m in modes}
+    signatures = set(jobs_by_signature)
+    job_ids = {job_id for ids in jobs_by_signature.values() for job_id in ids}
     if not signatures:
         return set()
 
@@ -189,11 +190,63 @@ def _promoted_failure_signatures(session: Session, modes) -> set[str]:
     if job_ids:
         stmt = stmt.where(or_(EvalCase.job_id.is_(None), EvalCase.job_id.in_(job_ids)))
 
-    promoted = set()
+    global_cases = set()
+    covered_jobs: dict[str, set[str]] = {}
     for signature, case_job_id in session.execute(stmt):
         if case_job_id is None or case_job_id in job_ids:
-            promoted.add(signature)
-    return promoted
+            if case_job_id is None:
+                global_cases.add(signature)
+            else:
+                covered_jobs.setdefault(signature, set()).add(case_job_id)
+    return {
+        signature
+        for signature, mode_job_ids in jobs_by_signature.items()
+        if signature in global_cases or mode_job_ids <= covered_jobs.get(signature, set())
+    }
+
+
+def _failure_mode_case_coverage(
+    session: Session, signature: str, job_ids: set[str]
+) -> tuple[bool, set[str]]:
+    stmt = select(EvalCase.job_id).where(EvalCase.source_signature == signature)
+    if job_ids:
+        stmt = stmt.where(or_(EvalCase.job_id.is_(None), EvalCase.job_id.in_(job_ids)))
+
+    has_global_case = False
+    covered_job_ids: set[str] = set()
+    for (case_job_id,) in session.execute(stmt):
+        if case_job_id is None:
+            has_global_case = True
+        elif case_job_id in job_ids:
+            covered_job_ids.add(case_job_id)
+    return has_global_case, covered_job_ids
+
+
+def _next_uncovered_failure_mode(session: Session, mode, scope_ids: list[str] | None):
+    has_global_case, covered_job_ids = _failure_mode_case_coverage(
+        session, mode.signature, set(mode.job_ids)
+    )
+    if has_global_case:
+        raise HTTPException(409, "eval case for failure mode already exists")
+
+    uncovered_job_ids = set(mode.job_ids) - covered_job_ids
+    if not uncovered_job_ids:
+        raise HTTPException(409, "eval case for failure mode already exists")
+    if uncovered_job_ids == set(mode.job_ids):
+        return mode
+
+    candidates = [
+        job_mode
+        for job_id in uncovered_job_ids
+        for job_mode in cluster_failures(session, job_id=job_id, job_ids=scope_ids)
+        if job_mode.signature == mode.signature
+    ]
+    if not candidates:
+        raise HTTPException(404, "failure mode not found")
+    return max(
+        candidates,
+        key=lambda m: m.last_seen.timestamp() if m.last_seen else 0.0,
+    )
 
 
 def _latest_run_by_job(session: Session, job_ids: list[str]) -> dict[str, Run]:
@@ -779,6 +832,8 @@ def promote_failure_mode(
     mode = modes.get(body.signature)
     if mode is None:
         raise HTTPException(404, "failure mode not found")
+    if body.job_id is None:
+        mode = _next_uncovered_failure_mode(session, mode, scope_ids)
 
     latest = session.get(Run, mode.latest_run_id)
     job = latest.job

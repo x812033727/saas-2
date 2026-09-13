@@ -734,13 +734,17 @@ async function failuresView(filter = "all") {
   const unpromotedOnly = filter === "unpromoted";
   const params = new URLSearchParams({ min_count: String(recurringOnly ? 2 : 1) });
   if (unpromotedOnly) params.set("unpromoted_only", "true");
-  const [modes, cases, jobs] = await Promise.all([
+  const [modes, cases, jobs, usage] = await Promise.all([
     api(`/failure-modes?${params}`),
     api("/eval-cases"),
     api("/jobs").catch(() => []),
+    api("/usage").catch(() => null),
   ]);
   const hasEnabledCases = cases.some((c) => c.enabled);
+  const hostedTenant = Boolean(usage && usage.tenant_id);
+  const globalEvalOption = hostedTenant ? "" : '<option value="">global</option>';
   const jobOptions = jobs.map((j) => `<option value="${esc(j.id)}">${esc(j.name)}</option>`).join("");
+  const canCreateEvalCase = !hostedTenant || jobs.length > 0;
 
   const modeRows = modes.map((m) => `
     <tr>
@@ -782,9 +786,9 @@ async function failuresView(filter = "all") {
           <label>name <input name="name" required placeholder="checkout-regression"></label>
           <label>engine <select name="engine"><option>offline</option><option>ti</option></select></label>
           <label>min score <input name="min_score" type="number" step="0.05" min="0" max="1" value="0.9"></label>
-          <label>job <select name="job_id"><option value="">global</option>${jobOptions}</select></label>
+          <label>job <select name="job_id" ${hostedTenant ? "required" : ""}>${globalEvalOption}${jobOptions}</select></label>
           <label class="wide">payload JSON <textarea name="payload" spellcheck="false">{}</textarea></label>
-          <button class="primary submit" type="submit">Create eval case</button>
+          <button class="primary submit" type="submit" ${canCreateEvalCase ? "" : "disabled"}>Create eval case</button>
         </form>
       </div>
     </details>
