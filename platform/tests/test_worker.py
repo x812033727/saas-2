@@ -1,8 +1,10 @@
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select
 
 from ticloud.models import Run, RunStatus
-from ticloud.scheduler.queue import claim_next_run, enqueue_manual
-from ticloud.scheduler.worker import _last_error_line, execute_run
+from ticloud.scheduler.queue import claim_next_run, enqueue_due_jobs, enqueue_manual
+from ticloud.scheduler.worker import _last_error_line, execute_run, reap_stale_running_runs
 
 from test_scheduler import make_job
 
@@ -65,6 +67,35 @@ def test_timeout_guard_cancels_run(session):
     assert "timeout" in run.error
     # Timeouts are deterministic: no retry scheduled.
     assert session.scalars(select(Run)).all() == [run]
+
+
+def test_reap_stale_running_runs_unblocks_scheduled_job(session):
+    now = datetime.now(timezone.utc)
+    job = make_job(
+        session,
+        interval_seconds=60,
+        next_run_at=now - timedelta(seconds=1),
+        timeout_s=10,
+    )
+    stuck = Run(
+        job_id=job.id,
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=30),
+        started_at=now - timedelta(seconds=30),
+    )
+    session.add(stuck)
+    session.commit()
+
+    reaped = reap_stale_running_runs(session, now=now)
+    created = enqueue_due_jobs(session, now=now)
+
+    session.refresh(stuck)
+    assert [run.id for run in reaped] == [stuck.id]
+    assert stuck.status == RunStatus.TIMED_OUT
+    assert "stale running run" in stuck.error
+    assert stuck.finished_at is not None
+    assert len(created) == 1
+    assert created[0].job_id == job.id
 
 
 def test_failure_schedules_retry_with_context(session):

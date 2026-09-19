@@ -21,6 +21,11 @@ log = logging.getLogger(__name__)
 # How many oldest-queued runs to consider when the head-of-line run's tenant
 # is at its concurrency cap (so one busy tenant can't block the whole queue).
 _CLAIM_CANDIDATES = 25
+_ACTIVE_RUN_STATUSES = (
+    RunStatus.QUEUED,
+    RunStatus.AWAITING_APPROVAL,
+    RunStatus.RUNNING,
+)
 
 
 def running_count(session: Session, tenant_id: str | None = None) -> int:
@@ -59,6 +64,17 @@ def _raise_quota_alert_once(session: Session, job: Job) -> None:
         )
 
 
+def _has_active_run(session: Session, job: Job) -> bool:
+    return (
+        session.scalar(
+            select(Run.id)
+            .where(Run.job_id == job.id, Run.status.in_(_ACTIVE_RUN_STATUSES))
+            .limit(1)
+        )
+        is not None
+    )
+
+
 def enqueue_due_jobs(session: Session, now: datetime | None = None) -> list[Run]:
     """Scheduler tick: create queued runs for every due, unpaused job.
 
@@ -79,6 +95,9 @@ def enqueue_due_jobs(session: Session, now: datetime | None = None) -> list[Run]
     created: list[Run] = []
     for job in due:
         job.next_run_at = compute_next_run(job, after=now)
+        if _has_active_run(session, job):
+            log.info("skipped overlapping scheduled run for job %s", job.name)
+            continue
         if _quota_blocked(session, job, now):
             _raise_quota_alert_once(session, job)
             log.info("skipped over-budget job %s, next fire %s", job.name, job.next_run_at)

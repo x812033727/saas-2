@@ -28,6 +28,10 @@ def test_validate_webhook_url_accepts_http_urls(url):
         "https:///alert",
         "https://:443/alert",
         "https://@/alert",
+        "https://token@hooks.example/alert",
+        "https://user:pass@hooks.example/alert",
+        "https://hooks.example:abc/alert",
+        "https://hooks.example:99999/alert",
     ],
 )
 def test_validate_webhook_url_rejects_invalid_or_empty_host(url):

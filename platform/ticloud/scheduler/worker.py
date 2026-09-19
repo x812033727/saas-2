@@ -22,6 +22,7 @@ from ..db import get_session
 from ..engine import BudgetExceeded, RunContext, get_engine
 from ..eval import score_run
 from ..eval.notify import raise_alert
+from ..metrics import stale_running_run_ids
 from ..models import Alert, Run, RunStatus, ScoreRecord
 from .queue import claim_next_run, enqueue_due_jobs
 
@@ -148,6 +149,25 @@ def _finish(session, run: Run, status: RunStatus, error: str | None = None) -> N
     run.finished_at = datetime.now(timezone.utc)
     session.commit()
     log.info("run %s finished: %s", run.id, status.value)
+
+
+def reap_stale_running_runs(session, now: datetime | None = None) -> list[Run]:
+    """Recover runs left RUNNING after a worker crash or hard kill."""
+    reaped: list[Run] = []
+    for run_id in stale_running_run_ids(session, now=now):
+        run = session.get(Run, run_id)
+        if run is None or run.status != RunStatus.RUNNING:
+            continue
+        _finish(
+            session,
+            run,
+            RunStatus.TIMED_OUT,
+            error=f"stale running run exceeded timeout of {run.job.timeout_s}s",
+        )
+        _score_and_gate(session, run)
+        reaped.append(run)
+        log.warning("reaped stale running run %s", run.id)
+    return reaped
 
 
 def _maybe_retry(session, run: Run) -> bool:
@@ -293,6 +313,7 @@ def worker_loop(stop: threading.Event | None = None) -> None:
         if now - last_tick >= settings.tick_interval:
             session = get_session()
             try:
+                reap_stale_running_runs(session)
                 enqueue_due_jobs(session)
             finally:
                 session.close()
