@@ -101,6 +101,47 @@ def test_qa_eval_case_trims_name_and_preserves_valid_job_link(client, session):
     assert len(session.scalars(select(EvalCase)).all()) == 1
 
 
+def test_qa_eval_case_trims_job_id_and_rejects_blank_job_id(client, session):
+    job = client.post("/jobs", json={"name": "linked-source"}).json()
+
+    created = client.post(
+        "/eval-cases",
+        json={"name": "linked-case", "job_id": f"  {job['id']}  "},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["job_id"] == job["id"]
+
+    blank = client.post(
+        "/eval-cases",
+        json={"name": "blank-job-link", "job_id": " \t\n "},
+    )
+    assert blank.status_code == 422, blank.text
+    assert (
+        session.scalars(select(EvalCase).where(EvalCase.name == "blank-job-link")).all()
+        == []
+    )
+
+
+def test_qa_eval_run_request_trims_job_id_and_rejects_blank_job_id(client):
+    job = client.post("/jobs", json={"name": "eval-run-source"}).json()
+    client.post(
+        "/eval-cases",
+        json={"name": "eval-run-case", "job_id": job["id"], "payload": {}},
+    )
+
+    trimmed = client.post(
+        "/eval-cases/run",
+        json={"job_id": f"  {job['id']}  ", "min_score": 0.5},
+    )
+    assert trimmed.status_code == 200, trimmed.text
+    body = trimmed.json()
+    assert body["total"] == 1
+    assert body["cases"][0]["job_id"] == job["id"]
+
+    blank = client.post("/eval-cases/run", json={"job_id": " \t\n "})
+    assert blank.status_code == 422, blank.text
+
+
 def test_qa_eval_case_patch_partial_update_preserves_unspecified_fields(
     client, session
 ):

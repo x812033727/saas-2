@@ -231,13 +231,15 @@ def test_alerts_can_be_filtered_and_bulk_acked_by_job(client, session):
 
     scoped = client.get(
         "/alerts",
-        params={"job_id": job["id"], "acknowledged": False},
+        params={"job_id": f"  {job['id']}\n", "acknowledged": False},
     ).json()
     assert {a["message"] for a in scoped} == {"first", "second"}
     assert all(a["job_id"] == job["id"] for a in scoped)
 
+    assert client.get("/alerts", params={"job_id": " \t\n "}).status_code == 422
+    assert client.post("/alerts/ack-all", params={"job_id": " \t\n "}).status_code == 422
     assert client.get("/alerts", params={"job_id": "missing"}).status_code == 404
-    assert client.post("/alerts/ack-all", params={"job_id": job["id"]}).json() == {
+    assert client.post("/alerts/ack-all", params={"job_id": f"\t{job['id']}  "}).json() == {
         "acknowledged": 2
     }
     assert client.get(
