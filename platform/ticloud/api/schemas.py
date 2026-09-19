@@ -337,9 +337,14 @@ class FailureModeOut(BaseModel):
 
 
 class PromoteRequest(WriteModel):
-    signature: str
-    job_id: str | None = None
+    signature: str = Field(min_length=1, max_length=64)
+    job_id: str | None = Field(default=None, min_length=1, max_length=32)
     min_score: float = Field(default=0.9, ge=0, le=1)
+
+    @field_validator("signature", "job_id", mode="before")
+    @classmethod
+    def _strip_outer_whitespace(cls, v: str | None) -> str | None:
+        return v.strip() if isinstance(v, str) else v
 
 
 class EvalCaseCreate(WriteModel):
@@ -347,11 +352,11 @@ class EvalCaseCreate(WriteModel):
     engine: str = "offline"
     payload: dict = Field(default_factory=dict)
     min_score: float = Field(default=0.9, ge=0, le=1)
-    job_id: str | None = None
+    job_id: str | None = Field(default=None, min_length=1, max_length=32)
 
-    @field_validator("name", mode="before")
+    @field_validator("name", "job_id", mode="before")
     @classmethod
-    def _strip_name(cls, v: str) -> str:
+    def _strip_outer_whitespace(cls, v: str | None) -> str | None:
         return v.strip() if isinstance(v, str) else v
 
     @field_validator("engine")
@@ -406,6 +411,11 @@ class EvalCaseUpdate(WriteModel):
 class EvalRunRequest(WriteModel):
     job_id: str | None = Field(default=None, min_length=1, max_length=32)
     min_score: float | None = Field(default=None, ge=0, le=1)
+
+    @field_validator("job_id", mode="before")
+    @classmethod
+    def _strip_job_id(cls, v: str | None) -> str | None:
+        return v.strip() if isinstance(v, str) else v
 
 
 class EvalRunCaseOut(BaseModel):

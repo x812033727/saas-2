@@ -445,6 +445,19 @@ def _get_job(session: Session, job_id: str, tenant: Tenant | None = None) -> Job
     return job
 
 
+def _clean_optional_query_id(
+    value: str | None, field: str = "job_id", max_length: int = 32
+) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        raise HTTPException(422, f"{field} cannot be blank")
+    if len(value) > max_length:
+        raise HTTPException(422, f"{field} must be at most {max_length} characters")
+    return value
+
+
 @app.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(
     job_id: str,
@@ -613,6 +626,7 @@ def job_stats(
 
 
 def _alerts_scope(session: Session, tenant: Tenant | None, job_id: str | None = None):
+    job_id = _clean_optional_query_id(job_id)
     stmt = select(Alert)
     if job_id is not None:
         _get_job(session, job_id, tenant)
@@ -625,7 +639,7 @@ def _alerts_scope(session: Session, tenant: Tenant | None, job_id: str | None = 
 @app.get("/alerts", response_model=list[AlertOut])
 def list_alerts(
     acknowledged: bool | None = None,
-    job_id: str | None = Query(default=None, min_length=1, max_length=32),
+    job_id: str | None = None,
     limit: int = Query(100, ge=1, le=500),
     cursor: str | None = None,
     session: Session = Depends(db),
@@ -672,7 +686,7 @@ def ack_alert(
 
 @app.post("/alerts/ack-all", response_model=AlertAckSummary)
 def ack_all_alerts(
-    job_id: str | None = Query(default=None, min_length=1, max_length=32),
+    job_id: str | None = None,
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> AlertAckSummary:
@@ -794,6 +808,7 @@ def failure_modes(
     tenant: Tenant | None = Depends(current_tenant),
 ) -> list[FailureModeOut]:
     """Failed runs clustered into recurring failure modes."""
+    job_id = _clean_optional_query_id(job_id)
     if job_id is not None:
         _get_job(session, job_id, tenant)
     scope_ids = _tenant_job_ids(session, tenant) if tenant is not None else None

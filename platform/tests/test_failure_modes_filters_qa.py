@@ -87,6 +87,35 @@ def test_qa_failure_modes_combines_min_count_and_unpromoted_filters(client):
     assert invalid.status_code == 422
 
 
+def test_qa_promote_trims_signature_and_rejects_blank_signature(client):
+    job = _create_job(client, name="qa-promote-input", payload={"fail_at": 2})
+    _trigger_failures(client, job["id"])
+    sig = client.get("/failure-modes").json()[0]["signature"]
+
+    promoted = client.post(
+        "/failure-modes/promote",
+        json={"signature": f"  {sig}\n"},
+    )
+    assert promoted.status_code == 201, promoted.text
+    assert promoted.json()["source_signature"] == sig
+
+    blank = client.post("/failure-modes/promote", json={"signature": " \t\n "})
+    assert blank.status_code == 422
+
+
+def test_qa_failure_modes_trims_job_id_query_and_rejects_blank(client):
+    job = _create_job(client, name="qa-failure-mode-query", payload={"fail_at": 2})
+    _trigger_failures(client, job["id"])
+
+    scoped = client.get("/failure-modes", params={"job_id": f"  {job['id']}\n"})
+    assert scoped.status_code == 200, scoped.text
+    assert len(scoped.json()) == 1
+    assert scoped.json()[0]["job_ids"] == [job["id"]]
+
+    blank = client.get("/failure-modes", params={"job_id": " \t\n "})
+    assert blank.status_code == 422, blank.text
+
+
 def test_qa_job_scoped_unpromoted_filter_does_not_hide_same_signature(client):
     job_a = _create_job(client, name="qa-shared-a", payload={"fail_at": 3})
     job_b = _create_job(client, name="qa-shared-b", payload={"fail_at": 3})
