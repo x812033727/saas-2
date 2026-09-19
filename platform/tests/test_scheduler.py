@@ -55,6 +55,53 @@ def test_enqueue_due_jobs_advances_schedule(session):
     assert enqueue_due_jobs(session, now=now) == []
 
 
+def test_enqueue_due_jobs_skips_overlapping_active_runs(session):
+    now = datetime.now(timezone.utc)
+    jobs = []
+    for status in (RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.AWAITING_APPROVAL):
+        job = make_job(
+            session,
+            name=f"active-{status.value}",
+            interval_seconds=60,
+            next_run_at=now - timedelta(minutes=1),
+        )
+        session.add(
+            Run(
+                job_id=job.id,
+                status=status,
+                scheduled_at=now - timedelta(minutes=5),
+            )
+        )
+        jobs.append(job)
+    session.commit()
+
+    assert enqueue_due_jobs(session, now=now) == []
+
+    for job in jobs:
+        session.refresh(job)
+        assert job.next_run_at > now
+    assert session.query(Run).count() == len(jobs)
+
+
+def test_enqueue_due_jobs_allows_new_run_after_terminal_status(session):
+    now = datetime.now(timezone.utc)
+    job = make_job(session, interval_seconds=60, next_run_at=now - timedelta(minutes=1))
+    session.add(
+        Run(
+            job_id=job.id,
+            status=RunStatus.SUCCEEDED,
+            scheduled_at=now - timedelta(minutes=5),
+        )
+    )
+    session.commit()
+
+    created = enqueue_due_jobs(session, now=now)
+
+    assert len(created) == 1
+    assert created[0].job_id == job.id
+    assert session.query(Run).count() == 2
+
+
 def test_paused_job_not_enqueued(session):
     now = datetime.now(timezone.utc)
     make_job(session, interval_seconds=60, next_run_at=now - timedelta(minutes=1), paused=True)
