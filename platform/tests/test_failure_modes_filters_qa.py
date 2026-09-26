@@ -87,6 +87,36 @@ def test_qa_failure_modes_combines_min_count_and_unpromoted_filters(client):
     assert invalid.status_code == 422
 
 
+def test_qa_failure_modes_limit_runs_bounds_scan_window(client):
+    older = _create_job(
+        client,
+        name="qa-limit-older",
+        payload={"fail_at": 0},
+    )
+    newer = _create_job(
+        client,
+        name="qa-limit-newer",
+        payload={"fail_at": 3},
+    )
+    _trigger_failures(client, older["id"])
+    _trigger_failures(client, newer["id"])
+
+    limited = client.get("/failure-modes?limit_runs=1")
+    assert limited.status_code == 200, limited.text
+    assert len(limited.json()) == 1
+    assert limited.json()[0]["job_ids"] == [newer["id"]]
+
+    full = client.get("/failure-modes?limit_runs=2")
+    assert full.status_code == 200, full.text
+    assert {tuple(mode["job_ids"]) for mode in full.json()} == {
+        (older["id"],),
+        (newer["id"],),
+    }
+
+    invalid = client.get("/failure-modes?limit_runs=0")
+    assert invalid.status_code == 422
+
+
 def test_qa_promote_trims_signature_and_rejects_blank_signature(client):
     job = _create_job(client, name="qa-promote-input", payload={"fail_at": 2})
     _trigger_failures(client, job["id"])

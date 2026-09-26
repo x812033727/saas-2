@@ -10,7 +10,7 @@ is a cloud-tier upgrade on top of the same interface.
 import hashlib
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -97,6 +97,6 @@ def cluster_failures(
 
     return sorted(
         (m for m in modes.values() if m.count >= min_count),
-        key=lambda m: m.count,
+        key=lambda m: (m.count, m.last_seen or datetime.min.replace(tzinfo=timezone.utc)),
         reverse=True,
     )

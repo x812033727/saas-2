@@ -93,6 +93,14 @@ def test_api_module_entrypoint_exposes_server_help():
     assert "--seed-demo" in result.stdout
 
 
+def test_readme_operating_command_uses_api_server_entrypoint():
+    readme = (ROOT / "README.md").read_text()
+    operating = readme.split("## Operating it", 1)[1].split("## Tests", 1)[0]
+
+    assert "../.venv/bin/python -m ticloud.api --host" in operating
+    assert "pytest" not in operating
+
+
 def test_api_module_entrypoint_can_seed_demo_before_serving(monkeypatch):
     from ticloud.api import main as api_main
     from ticloud import demo
