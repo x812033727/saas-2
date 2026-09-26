@@ -42,6 +42,8 @@ def _validate_scorers_config(value: dict | None) -> dict | None:
             raise ValueError("scorer names must be strings")
         if not isinstance(cfg, dict):
             raise ValueError(f"scorers.{name} must be an object")
+        if "enabled" in cfg and not isinstance(cfg["enabled"], bool):
+            raise ValueError(f"scorers.{name}.enabled must be a boolean")
     return value
 
 
