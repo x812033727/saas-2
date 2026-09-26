@@ -102,6 +102,15 @@ def test_create_job_rejects_malformed_scorer_config(client):
     assert "scorers.judge" in resp.text
 
 
+def test_create_job_rejects_non_boolean_scorer_enabled(client):
+    resp = client.post(
+        "/jobs",
+        json={"name": "x", "scorers": {"judge": {"enabled": "false"}}},
+    )
+    assert resp.status_code == 422
+    assert "scorers.judge.enabled" in resp.text
+
+
 def test_duplicate_name_conflicts(client):
     create_job(client)
     resp = client.post("/jobs", json={"name": "nightly-patrol"})
@@ -171,6 +180,16 @@ def test_update_job_rejects_malformed_scorer_config(client):
     resp = client.patch(f"/jobs/{job['id']}", json={"scorers": {"judge": "enabled"}})
     assert resp.status_code == 422
     assert "scorers.judge" in resp.text
+
+
+def test_update_job_rejects_non_boolean_scorer_enabled(client):
+    job = create_job(client)
+    resp = client.patch(
+        f"/jobs/{job['id']}",
+        json={"scorers": {"judge": {"enabled": "false"}}},
+    )
+    assert resp.status_code == 422
+    assert "scorers.judge.enabled" in resp.text
 
 
 def test_trigger_execute_and_inspect_trace(client):

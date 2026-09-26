@@ -85,20 +85,87 @@ def score_run(run: Run, session: Session, config: dict | None = None) -> tuple[f
                 )
             )
             continue
-        if not scorer_cfg.get("enabled", True):
+        enabled = scorer_cfg.get("enabled", True)
+        if not isinstance(enabled, bool):
+            results.append(
+                ScoreResult(
+                    scorer=name,
+                    score=0.0,
+                    passed=False,
+                    detail={"error": "scorer enabled flag must be a boolean"},
+                    required=True,
+                )
+            )
+            continue
+        if not enabled:
             continue
         try:
             result = fn(run, session, scorer_cfg)
         except Exception as exc:  # noqa: BLE001 - fail closed, keep scoring
             result = ScoreResult(scorer=name, score=0.0, passed=False, detail={"error": str(exc)})
-        if result is not None:
+        if result is None:
+            continue
+        if not isinstance(result, ScoreResult):
+            results.append(
+                ScoreResult(
+                    scorer=name,
+                    score=0.0,
+                    passed=False,
+                    detail={
+                        "error": "scorer must return ScoreResult or None",
+                        "type": type(result).__name__,
+                    },
+                    required=True,
+                )
+            )
+        else:
             results.append(result)
 
     if not results:
         return 1.0, []
-    if any(r.required and not r.passed for r in results):
-        return 0.0, results
     for i, result in enumerate(results):
+        if not isinstance(result.passed, bool):
+            invalid = ScoreResult(
+                scorer=result.scorer,
+                score=0.0,
+                passed=False,
+                detail={
+                    "error": "scorer passed flag must be a boolean",
+                    "passed": repr(result.passed),
+                },
+                required=True,
+            )
+            return 0.0, [*results[:i], invalid, *results[i + 1:]]
+        if not isinstance(result.required, bool):
+            invalid = ScoreResult(
+                scorer=result.scorer,
+                score=0.0,
+                passed=False,
+                detail={
+                    "error": "scorer required flag must be a boolean",
+                    "required": repr(result.required),
+                },
+                required=True,
+            )
+            return 0.0, [*results[:i], invalid, *results[i + 1:]]
+        score = result.score
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, Real)
+            or not math.isfinite(score)
+            or not 0.0 <= score <= 1.0
+        ):
+            invalid = ScoreResult(
+                scorer=result.scorer,
+                score=0.0,
+                passed=False,
+                detail={
+                    "error": "scorer score must be a finite number between 0 and 1",
+                    "score": repr(score),
+                },
+                required=True,
+            )
+            return 0.0, [*results[:i], invalid, *results[i + 1:]]
         weight = result.weight
         if (
             isinstance(weight, bool)
@@ -117,6 +184,8 @@ def score_run(run: Run, session: Session, config: dict | None = None) -> tuple[f
                 required=True,
             )
             return 0.0, [*results[:i], invalid, *results[i + 1:]]
+    if any(r.required and not r.passed for r in results):
+        return 0.0, results
     total_weight = sum(r.weight for r in results)
     overall = sum(r.score * r.weight for r in results) / total_weight
     return round(overall, 4), results
