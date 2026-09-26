@@ -220,10 +220,20 @@ def test_ui_exposes_job_scoped_failure_mode_controls(client):
 def test_ui_exposes_failure_mode_filters(client):
     app_js = client.get("/ui/app.js").text
 
-    assert 'href="#/failures/recurring"' in app_js
-    assert 'href="#/failures/unpromoted"' in app_js
+    assert 'failureRoute("recurring", limitRuns)' in app_js
+    assert 'failureRoute("unpromoted", limitRuns)' in app_js
     assert 'params.set("unpromoted_only", "true")' in app_js
     assert "m.promoted" in app_js
+
+
+def test_ui_exposes_failure_mode_scan_window(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert 'limit_runs: String(limitRuns)' in app_js
+    assert 'aria-label="Failure scan window"' in app_js
+    assert '[100, 500, 1000, 5000]' in app_js
+    assert 'href="${failureRoute(filter, n)}">Last ${n}</a>' in app_js
+    assert 'await failuresView(id, subid)' in app_js
 
 
 def test_ui_exposes_manual_eval_case_creation(client):

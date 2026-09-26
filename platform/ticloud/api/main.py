@@ -803,6 +803,7 @@ def delete_lesson(
 def failure_modes(
     job_id: str | None = None,
     min_count: int = Query(1, ge=1),
+    limit_runs: int = Query(500, ge=1, le=5000),
     unpromoted_only: bool = False,
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
@@ -812,7 +813,13 @@ def failure_modes(
     if job_id is not None:
         _get_job(session, job_id, tenant)
     scope_ids = _tenant_job_ids(session, tenant) if tenant is not None else None
-    modes = cluster_failures(session, job_id=job_id, job_ids=scope_ids, min_count=min_count)
+    modes = cluster_failures(
+        session,
+        job_id=job_id,
+        job_ids=scope_ids,
+        limit_runs=limit_runs,
+        min_count=min_count,
+    )
     promoted = _promoted_failure_signatures(session, modes)
     if unpromoted_only:
         modes = [m for m in modes if m.signature not in promoted]

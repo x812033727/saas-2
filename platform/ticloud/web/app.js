@@ -103,6 +103,19 @@ function templateForm(t) {
     </section>`;
 }
 
+function failureRoute(filter, limitRuns) {
+  const filterPath = filter === "all" ? "" : `/${filter}`;
+  const windowPath = limitRuns === 500 ? "" : `/last-${limitRuns}`;
+  return `#/failures${filterPath}${windowPath}`;
+}
+
+function parseFailureRoute(filter = "all", windowSegment = "") {
+  const validFilter = ["recurring", "unpromoted"].includes(filter) ? filter : "all";
+  const rawWindow = validFilter === "all" ? filter : windowSegment;
+  const match = /^last-(100|500|1000|5000)$/.exec(rawWindow || "");
+  return { filter: validFilter, limitRuns: match ? Number(match[1]) : 500 };
+}
+
 function evalCaseRows(c) {
   const source = c.source_signature
     ? `<code style="font-size:12px">${esc(c.source_signature)}</code>`
@@ -728,11 +741,16 @@ async function alertsView(filter = "all", jobId = null) {
     </div>`;
 }
 
-async function failuresView(filter = "all") {
-  filter = ["recurring", "unpromoted"].includes(filter) ? filter : "all";
+async function failuresView(filter = "all", windowSegment = "") {
+  const route = parseFailureRoute(filter, windowSegment);
+  filter = route.filter;
+  const limitRuns = route.limitRuns;
   const recurringOnly = filter === "recurring";
   const unpromotedOnly = filter === "unpromoted";
-  const params = new URLSearchParams({ min_count: String(recurringOnly ? 2 : 1) });
+  const params = new URLSearchParams({
+    min_count: String(recurringOnly ? 2 : 1),
+    limit_runs: String(limitRuns),
+  });
   if (unpromotedOnly) params.set("unpromoted_only", "true");
   const [modes, cases, jobs, usage] = await Promise.all([
     api(`/failure-modes?${params}`),
@@ -765,9 +783,13 @@ async function failuresView(filter = "all") {
     <h1>Failure modes</h1>
     <div class="sub">failed runs clustered by error signature — promote recurring ones into regression eval cases</div>
     <div class="tabs" aria-label="Failure mode filters">
-      <a class="${filter === "all" ? "active" : ""}" href="#/failures">All</a>
-      <a class="${recurringOnly ? "active" : ""}" href="#/failures/recurring">Recurring</a>
-      <a class="${unpromotedOnly ? "active" : ""}" href="#/failures/unpromoted">Unpromoted</a>
+      <a class="${filter === "all" ? "active" : ""}" href="${failureRoute("all", limitRuns)}">All</a>
+      <a class="${recurringOnly ? "active" : ""}" href="${failureRoute("recurring", limitRuns)}">Recurring</a>
+      <a class="${unpromotedOnly ? "active" : ""}" href="${failureRoute("unpromoted", limitRuns)}">Unpromoted</a>
+    </div>
+    <div class="tabs" aria-label="Failure scan window">
+      ${[100, 500, 1000, 5000].map((n) =>
+        `<a class="${limitRuns === n ? "active" : ""}" href="${failureRoute(filter, n)}">Last ${n}</a>`).join("")}
     </div>
     <div class="card">
       ${modes.length ? `<table>
@@ -890,7 +912,7 @@ async function render() {
     if (view === "runs" && id) await runDetailView(id);
     else if (view === "usage") { await usageView(); schedulePoll(15000); }
     else if (view === "approvals") { await approvalsView(); schedulePoll(5000); }
-    else if (view === "failures") { await failuresView(id); schedulePoll(6000); }
+    else if (view === "failures") { await failuresView(id, subid); schedulePoll(6000); }
     else if (view === "alerts") { await alertsView(id || "all", subid || null); schedulePoll(5000); }
     else if (view === "jobs" && id) { await jobDetailView(id); schedulePoll(3000); }
     else { await jobsView(); schedulePoll(3000); }

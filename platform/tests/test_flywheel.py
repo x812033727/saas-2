@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -79,6 +80,35 @@ def test_cluster_failures_groups_by_signature(session):
     assert modes[0].count == 3  # most frequent first
     assert modes[1].count == 1
     assert modes[0].latest_run_id in modes[0].sample_run_ids
+
+
+def test_cluster_failures_breaks_count_ties_by_recent_failure(session):
+    older = make_job(session, name="older-failure")
+    newer = make_job(session, name="newer-failure")
+    session.add_all(
+        [
+            Run(
+                job_id=older.id,
+                status=RunStatus.FAILED,
+                scheduled_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                error="RuntimeError: old failure",
+            ),
+            Run(
+                job_id=newer.id,
+                status=RunStatus.FAILED,
+                scheduled_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+                error="RuntimeError: new failure",
+            ),
+        ]
+    )
+    session.commit()
+
+    modes = cluster_failures(session)
+
+    assert [m.summary for m in modes] == [
+        "RuntimeError: new failure",
+        "RuntimeError: old failure",
+    ]
 
 
 # ---------- promote + eval cases + CLI ----------
