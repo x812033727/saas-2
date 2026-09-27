@@ -128,3 +128,17 @@ def test_launch_smoke_base_url_can_come_from_env(monkeypatch):
     monkeypatch.setenv("TICLOUD_SMOKE_BASE_URL", " http://api.local:8000/ ")
 
     assert _normalize_base_url() == "http://api.local:8000/"
+
+
+def test_launch_smoke_rejects_base_url_without_http_scheme():
+    with pytest.raises(ValueError, match="base_url must be an http\\(s\\) URL"):
+        _normalize_base_url("localhost:8000")
+
+
+def test_launch_smoke_cli_reports_invalid_base_url(capsys):
+    assert smoke.main(["--base-url", "localhost:8000"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "smoke FAIL:" in captured.err
+    assert "base_url must be an http(s) URL" in captured.err

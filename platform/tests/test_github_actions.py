@@ -23,3 +23,14 @@ def test_composite_action_emits_json_and_github_summary():
 
     assert '--summary-file "$GITHUB_STEP_SUMMARY"' in action
     assert 'python -m ticloud.eval.cli run "${args[@]}" --json' in action
+
+
+def test_composite_action_routes_inputs_through_environment():
+    action = (ROOT / "action.yml").read_text()
+
+    assert "TICLOUD_ACTION_REF: ${{ inputs.ref }}" in action
+    assert "TICLOUD_ACTION_MIN_SCORE: ${{ inputs.min-score }}" in action
+    assert "TICLOUD_ACTION_JOB: ${{ inputs.job }}" in action
+    assert "${{ inputs.ref }}#subdirectory" not in action
+    assert '[ -n "${{ inputs.min-score }}" ]' not in action
+    assert '[ -n "${{ inputs.job }}" ]' not in action

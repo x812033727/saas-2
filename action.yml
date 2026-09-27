@@ -29,14 +29,18 @@ runs:
         python-version: "3.12"
     - name: Install Ti Cloud
       shell: bash
-      run: pip install "ticloud @ git+https://github.com/x812033727/saas-2.git@${{ inputs.ref }}#subdirectory=platform"
+      env:
+        TICLOUD_ACTION_REF: ${{ inputs.ref }}
+      run: pip install "ticloud @ git+https://github.com/x812033727/saas-2.git@${TICLOUD_ACTION_REF}#subdirectory=platform"
     - name: Run eval gate
       shell: bash
       env:
         TICLOUD_DATABASE_URL: ${{ inputs.database-url }}
+        TICLOUD_ACTION_MIN_SCORE: ${{ inputs.min-score }}
+        TICLOUD_ACTION_JOB: ${{ inputs.job }}
       run: |
         args=()
-        [ -n "${{ inputs.min-score }}" ] && args+=(--min-score "${{ inputs.min-score }}")
-        [ -n "${{ inputs.job }}" ] && args+=(--job "${{ inputs.job }}")
+        [ -n "$TICLOUD_ACTION_MIN_SCORE" ] && args+=(--min-score "$TICLOUD_ACTION_MIN_SCORE")
+        [ -n "$TICLOUD_ACTION_JOB" ] && args+=(--job "$TICLOUD_ACTION_JOB")
         [ -n "${GITHUB_STEP_SUMMARY:-}" ] && args+=(--summary-file "$GITHUB_STEP_SUMMARY")
         python -m ticloud.eval.cli run "${args[@]}" --json

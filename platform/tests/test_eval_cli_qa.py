@@ -5,6 +5,9 @@ import subprocess
 import sys
 from textwrap import dedent
 
+import pytest
+
+from ticloud.eval.cli import main
 from ticloud.eval.cli import run_cases
 from ticloud.models import EvalCase
 
@@ -30,6 +33,16 @@ def test_qa_empty_eval_set_json_and_summary_are_not_silent(session, tmp_path, ca
     assert "### Ti Cloud eval gate" in text
     assert "- Total: 0" in text
     assert "| Case | Score | Min | Result |" in text
+
+
+def test_qa_eval_cli_rejects_invalid_min_score_override(session):
+    with pytest.raises(ValueError, match="min_score_override"):
+        run_cases(min_score_override=1.01)
+
+    with pytest.raises(SystemExit) as exc:
+        main(["run", "--min-score", "-0.1"])
+
+    assert exc.value.code == 2
 
 
 def test_qa_job_filter_json_and_summary_only_report_selected_case(session, tmp_path, capsys):

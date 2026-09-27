@@ -23,6 +23,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
 from urllib.request import Request, urlopen
 
+from .validation import validate_http_url
+
 DEFAULT_DATABASE_URL = "sqlite:///./ticloud.db"
 DEFAULT_DATABASE_FILENAME = "ticloud.db"
 HTTP_TIMEOUT_S = 5
@@ -78,6 +80,7 @@ def _normalize_base_url(base_url: str | None = None) -> str | None:
     raw = raw.strip()
     if not raw:
         return None
+    raw = validate_http_url(raw, "base_url")
     return f"{raw.rstrip('/')}/"
 
 
