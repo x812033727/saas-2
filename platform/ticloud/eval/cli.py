@@ -22,6 +22,16 @@ from ..models import EvalCase
 from .runner import eval_cases_payload
 
 
+def _score_threshold(raw: str) -> float:
+    try:
+        value = float(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a number between 0 and 1")
+    if not 0 <= value <= 1:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return value
+
+
 def _format_summary(payload: dict) -> str:
     lines = [
         "### Ti Cloud eval gate",
@@ -52,6 +62,8 @@ def run_cases(
     json_output: bool = False,
     summary_file: str | None = None,
 ) -> int:
+    if min_score_override is not None and not 0 <= min_score_override <= 1:
+        raise ValueError("min_score_override must be between 0 and 1")
     session = get_session()
     try:
         stmt = select(EvalCase).where(EvalCase.enabled.is_(True)).order_by(EvalCase.created_at)
@@ -136,7 +148,12 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     run_p = sub.add_parser("run", help="run eval cases; exit 1 on any regression")
     run_p.add_argument("--job", default=None, help="only cases sourced from this job id")
-    run_p.add_argument("--min-score", type=float, default=None, help="override every case's threshold")
+    run_p.add_argument(
+        "--min-score",
+        type=_score_threshold,
+        default=None,
+        help="override every case's threshold (0..1)",
+    )
     run_p.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     run_p.add_argument("--summary-file", default=None, help="append a Markdown eval summary to this file")
     list_p = sub.add_parser("list", help="list eval cases")
