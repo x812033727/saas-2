@@ -194,6 +194,14 @@ button.primary {
   color: #fff;
 }
 button.primary:hover { opacity: 0.9; }
+button.danger {
+  border-color: color-mix(in oklab, var(--critical) 35%, var(--border));
+  color: var(--critical);
+}
+button.danger:hover {
+  border-color: var(--critical);
+  color: var(--critical);
+}
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;

@@ -243,6 +243,27 @@ def test_ack_all_alerts_scoped_by_tenant(client, hosted, session):
     assert alerts_b[0]["job_id"] == job_b["id"]
 
 
+def test_unack_alert_is_scoped_by_tenant(client, hosted, session):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    _, _, auth_b = _mint_tenant(client, "team-b")
+    job_a = client.post("/jobs", json={"name": "a-reopen-alert"}, headers=auth_a).json()
+    alert = Alert(
+        job_id=job_a["id"],
+        kind="low_score",
+        message="reopen me",
+        acknowledged=True,
+    )
+    session.add(alert)
+    session.commit()
+
+    assert client.post(f"/alerts/{alert.id}/unack", headers=auth_b).status_code == 404
+    assert client.get("/alerts/summary", headers=auth_a).json() == {"unacknowledged": 0}
+
+    reopened = client.post(f"/alerts/{alert.id}/unack", headers=auth_a).json()
+    assert reopened["acknowledged"] is False
+    assert client.get("/alerts/summary", headers=auth_a).json() == {"unacknowledged": 1}
+
+
 def test_job_scoped_alerts_are_tenant_scoped(client, hosted, session):
     _, _, auth_a = _mint_tenant(client, "team-a")
     _, _, auth_b = _mint_tenant(client, "team-b")
