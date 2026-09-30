@@ -192,6 +192,31 @@ def test_update_job_rejects_non_boolean_scorer_enabled(client):
     assert "scorers.judge.enabled" in resp.text
 
 
+def test_delete_job_removes_history(client, session):
+    from ticloud.models import Alert, EvalCase, Lesson
+
+    job = create_job(client, cron=None)
+    run = client.post(f"/jobs/{job['id']}/trigger").json()
+    execute_run(run["id"])
+    session.add_all(
+        [
+            Alert(job_id=job["id"], run_id=run["id"], kind="low_score", message="check"),
+            EvalCase(name="deleted-job-case", job_id=job["id"], engine="offline", payload={}),
+            Lesson(job_id=job["id"], title="manual:cleanup", content="remove with job"),
+        ]
+    )
+    session.commit()
+
+    resp = client.delete(f"/jobs/{job['id']}")
+    assert resp.status_code == 204
+    assert client.get(f"/jobs/{job['id']}").status_code == 404
+    assert client.get(f"/runs/{run['id']}").status_code == 404
+    assert all(j["id"] != job["id"] for j in client.get("/jobs").json())
+    assert client.get("/alerts").json() == []
+    assert client.get("/eval-cases").json() == []
+    assert session.query(Lesson).filter_by(job_id=job["id"]).count() == 0
+
+
 def test_trigger_execute_and_inspect_trace(client):
     """End-to-end: create -> trigger -> execute -> read the structured trace."""
     job = create_job(client, cron=None)
@@ -267,6 +292,25 @@ def test_alerts_can_be_filtered_and_bulk_acked_by_job(client, session):
     ).json() == []
     remaining = client.get("/alerts", params={"acknowledged": False}).json()
     assert [a["job_id"] for a in remaining] == [other["id"]]
+
+
+def test_alert_can_be_reopened_after_ack(client, session):
+    from ticloud.models import Alert
+
+    job = create_job(client, name="reopen-alerts")
+    alert = Alert(job_id=job["id"], kind="low_score", message="needs attention")
+    session.add(alert)
+    session.commit()
+
+    acked = client.post(f"/alerts/{alert.id}/ack").json()
+    assert acked["acknowledged"] is True
+    assert client.get("/alerts/summary").json() == {"unacknowledged": 0}
+
+    reopened = client.post(f"/alerts/{alert.id}/unack").json()
+    assert reopened["acknowledged"] is False
+    assert client.get("/alerts/summary").json() == {"unacknowledged": 1}
+    open_alerts = client.get("/alerts", params={"acknowledged": False}).json()
+    assert [a["id"] for a in open_alerts] == [alert.id]
 
 
 def test_missing_resources_404(client):

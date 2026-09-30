@@ -118,6 +118,8 @@ def test_ui_exposes_alert_filters_and_bulk_ack(client):
     assert "acknowledged=false" in app_js
     assert "acknowledged=true" in app_js
     assert "data-ack-all" in app_js
+    assert "data-unack" in app_js
+    assert "`/alerts/${unackBtn.dataset.unack}/unack`" in app_js
     assert ".tabs a.active" in style_css
 
 
@@ -138,6 +140,19 @@ def test_ui_exposes_job_settings_editor(client):
     assert "`/jobs/${id}`" in app_js
     assert 'name="approval_required"' in app_js
     assert 'name="webhook_url"' in app_js
+
+
+def test_ui_exposes_job_delete_control(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert 'data-deljob="${esc(j.id)}"' in app_js
+    assert 'data-deljob="${esc(job.id)}"' in app_js
+    assert 'confirm(`Delete job "${name}" and all of its runs?`)' in app_js
+    assert 'api(`/jobs/${jobDeleteBtn.dataset.deljob}`, { method: "DELETE" })' in app_js
+    assert 'location.hash = "#/jobs"' in app_js
+    assert "button.danger" in style_css
+    assert app_js.index('button[data-deljob]') < app_js.index('button[data-act]')
 
 
 def test_ui_exposes_template_job_creation(client):

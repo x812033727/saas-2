@@ -309,6 +309,7 @@ async function jobsView() {
       <td class="actions" data-noclick>
         <button data-act="trigger" data-id="${j.id}">Run now</button>
         <button data-act="${j.paused ? "resume" : "pause"}" data-id="${j.id}">${j.paused ? "Resume" : "Pause"}</button>
+        <button class="danger" data-deljob="${esc(j.id)}" data-name="${esc(j.name)}">Delete</button>
       </td>
     </tr>`).join("");
 
@@ -506,6 +507,7 @@ async function jobDetailView(id) {
     <div class="actions">
       <button class="primary" data-act="trigger" data-id="${job.id}">Run now</button>
       <button data-act="${job.paused ? "resume" : "pause"}" data-id="${job.id}">${job.paused ? "Resume" : "Pause"}</button>
+      <button class="danger" data-deljob="${esc(job.id)}" data-name="${esc(job.name)}">Delete job</button>
     </div>`;
 
   document.getElementById("jobsettings").addEventListener("submit", async (ev) => {
@@ -720,7 +722,7 @@ async function alertsView(filter = "all", jobId = null) {
           ${a.run_id ? `<br><a href="#/runs/${a.run_id}"><small>view run</small></a>` : ""}</td>
       <td>${esc(fmtTime(a.created_at))}<br><small style="color:var(--muted)">${relTime(a.created_at)}</small></td>
       <td class="actions">${a.acknowledged
-        ? '<span style="color:var(--muted);font-size:13px">acked</span>'
+        ? `<button data-unack="${a.id}">Reopen</button>`
         : `<button data-ack="${a.id}">Ack</button>`}</td>
     </tr>`;
   }).join("");
@@ -950,6 +952,12 @@ app.addEventListener("click", (ev) => {
     act("POST", `/alerts/${ackBtn.dataset.ack}/ack`, render);
     return;
   }
+  const unackBtn = ev.target.closest("button[data-unack]");
+  if (unackBtn) {
+    ev.stopPropagation();
+    act("POST", `/alerts/${unackBtn.dataset.unack}/unack`, render);
+    return;
+  }
   if (ev.target.closest("button[data-ack-all]")) {
     ev.stopPropagation();
     const jobId = ev.target.closest("button[data-ack-all]").dataset.ackAll;
@@ -1004,6 +1012,16 @@ app.addEventListener("click", (ev) => {
   if (lessonBtn) {
     ev.stopPropagation();
     act("DELETE", `/jobs/${lessonBtn.dataset.job}/lessons/${lessonBtn.dataset.dellesson}`, render);
+    return;
+  }
+  const jobDeleteBtn = ev.target.closest("button[data-deljob]");
+  if (jobDeleteBtn) {
+    ev.stopPropagation();
+    const name = jobDeleteBtn.dataset.name || jobDeleteBtn.dataset.deljob;
+    if (!confirm(`Delete job "${name}" and all of its runs?`)) return;
+    api(`/jobs/${jobDeleteBtn.dataset.deljob}`, { method: "DELETE" })
+      .then(() => { toast("job deleted"); location.hash = "#/jobs"; render(); })
+      .catch((e) => toast(e.message));
     return;
   }
   const btn = ev.target.closest("button[data-act]");

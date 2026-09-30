@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -512,7 +512,11 @@ def delete_job(
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> None:
-    session.delete(_get_job(session, job_id, tenant))
+    job = _get_job(session, job_id, tenant)
+    session.execute(delete(Alert).where(Alert.job_id == job.id))
+    session.execute(delete(Lesson).where(Lesson.job_id == job.id))
+    session.execute(delete(EvalCase).where(EvalCase.job_id == job.id))
+    session.delete(job)
     session.commit()
 
 
@@ -669,17 +673,34 @@ def alerts_summary(
     return AlertSummary(unacknowledged=session.scalar(stmt) or 0)
 
 
+def _get_alert(session: Session, alert_id: str, tenant: Tenant | None) -> Alert:
+    alert = session.get(Alert, alert_id)
+    if alert is None:
+        raise HTTPException(404, "alert not found")
+    _get_job(session, alert.job_id, tenant)  # 404s for foreign tenants
+    return alert
+
+
 @app.post("/alerts/{alert_id}/ack", response_model=AlertOut)
 def ack_alert(
     alert_id: str,
     session: Session = Depends(db),
     tenant: Tenant | None = Depends(current_tenant),
 ) -> Alert:
-    alert = session.get(Alert, alert_id)
-    if alert is None:
-        raise HTTPException(404, "alert not found")
-    _get_job(session, alert.job_id, tenant)  # 404s for foreign tenants
+    alert = _get_alert(session, alert_id, tenant)
     alert.acknowledged = True
+    session.commit()
+    return alert
+
+
+@app.post("/alerts/{alert_id}/unack", response_model=AlertOut)
+def unack_alert(
+    alert_id: str,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> Alert:
+    alert = _get_alert(session, alert_id, tenant)
+    alert.acknowledged = False
     session.commit()
     return alert
 
