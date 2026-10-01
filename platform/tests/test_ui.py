@@ -1,4 +1,5 @@
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -118,6 +119,17 @@ def test_ui_exposes_run_history_filters(client):
     assert "`/jobs/${jobId}/runs?status=${encodeURIComponent(filter)}`" in app_js
     assert 'await jobDetailView(id, subid || "all")' in app_js
     assert "No runs match this filter." in app_js
+
+
+def test_ui_run_history_filters_match_api_status_values(client):
+    app_js = client.get("/ui/app.js").text
+
+    match = re.search(r"const RUN_HISTORY_FILTERS = \[(.*?)\];", app_js, re.S)
+    assert match
+    filters = re.findall(r'\["([^"]+)",\s*"[^"]+"\]', match.group(1))
+    api_status_filters = set(filters) - {"all", "stale"}
+
+    assert api_status_filters == {status.value for status in RunStatus}
 
 
 def test_ui_exposes_alert_filters_and_bulk_ack(client):

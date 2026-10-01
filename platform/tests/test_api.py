@@ -276,6 +276,43 @@ def test_list_runs_can_filter_status_and_stale(client, session):
     assert client.get(f"/jobs/{job['id']}/runs?status=nope").status_code == 422
 
 
+def test_stale_filter_only_returns_overdue_running_runs(client, session):
+    from datetime import datetime, timedelta, timezone
+
+    from ticloud.models import Run, RunStatus
+
+    job = create_job(client, cron=None, timeout_s=10)
+    now = datetime.now(timezone.utc)
+    stale_running = Run(
+        job_id=job["id"],
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=25),
+        started_at=now - timedelta(seconds=25),
+    )
+    within_grace_running = Run(
+        job_id=job["id"],
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=12),
+        started_at=now - timedelta(seconds=12),
+    )
+    old_failed = Run(
+        job_id=job["id"],
+        status=RunStatus.FAILED,
+        scheduled_at=now - timedelta(seconds=60),
+        started_at=now - timedelta(seconds=60),
+        finished_at=now - timedelta(seconds=59),
+    )
+    session.add_all([stale_running, within_grace_running, old_failed])
+    session.commit()
+
+    ids = [r["id"] for r in client.get(f"/jobs/{job['id']}/runs?stale=true").json()]
+    assert ids == [stale_running.id]
+    assert (
+        client.get(f"/jobs/{job['id']}/runs?stale=true&status=failed").json()
+        == []
+    )
+
+
 def test_limit_validation_for_runs_stats_and_alerts(client):
     job = create_job(client)
     cases = [
