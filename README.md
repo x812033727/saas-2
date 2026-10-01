@@ -260,8 +260,7 @@ Run the API and dashboard:
 
 ```bash
 # From the repository root; seeds the demo and serves http://localhost:8010/ui/.
-cd platform
-TICLOUD_DATABASE_URL=sqlite:///./dev.db ../.venv/bin/python -m ticloud.api --host 127.0.0.1 --port 8010 --seed-demo
+TICLOUD_DATABASE_URL=sqlite:///./platform/dev.db .venv/bin/python -m ticloud.api --host 127.0.0.1 --port 8010 --seed-demo
 ```
 
 `GET /health` and `GET /ready` both verify the API can reach its database;

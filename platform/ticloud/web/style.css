@@ -233,7 +233,7 @@ form.newjob label.checkrow, form.jobsettings label.checkrow, form.evalcase-edit 
   color: var(--ink-2);
 }
 form.newjob label.checkrow input, form.jobsettings label.checkrow input, form.evalcase-edit label.checkrow input { width: auto; }
-form.newjob input, form.newjob select, form.newjob textarea, form.jobsettings input, form.jobsettings select, form.jobsettings textarea, form.lessonform input, form.lessonform textarea, form.lessonedit input, form.lessonedit textarea, form.templatejob input, form.evalcase input, form.evalcase select, form.evalcase textarea, form.evalcase-edit input, form.evalcase-edit select, form.evalcase-edit textarea {
+form.newjob input, form.newjob select, form.newjob textarea, form.jobsettings input, form.jobsettings select, form.jobsettings textarea, form.lessonform input, form.lessonform textarea, form.lessonedit input, form.lessonedit textarea, form.templatejob input, form.templatejob textarea, form.evalcase input, form.evalcase select, form.evalcase textarea, form.evalcase-edit input, form.evalcase-edit select, form.evalcase-edit textarea {
   font: inherit;
   font-size: 14px;
   padding: 5px 8px;
@@ -242,8 +242,8 @@ form.newjob input, form.newjob select, form.newjob textarea, form.jobsettings in
   background: var(--surface);
   color: var(--ink);
 }
-form.newjob textarea, form.jobsettings textarea, form.lessonform textarea, form.lessonedit textarea, form.evalcase textarea, form.evalcase-edit textarea { resize: vertical; min-height: 76px; }
-form.newjob label.wide, form.jobsettings label.wide, form.evalcase label.wide, form.evalcase-edit label.wide { grid-column: 1 / -1; }
+form.newjob textarea, form.jobsettings textarea, form.lessonform textarea, form.lessonedit textarea, form.templatejob textarea, form.evalcase textarea, form.evalcase-edit textarea { resize: vertical; min-height: 76px; }
+form.newjob label.wide, form.jobsettings label.wide, form.templatejob label.wide, form.evalcase label.wide, form.evalcase-edit label.wide { grid-column: 1 / -1; }
 form.newjob label.checkrow input, form.jobsettings label.checkrow input, form.evalcase-edit label.checkrow input {
   width: auto;
   padding: 0;

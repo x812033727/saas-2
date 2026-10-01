@@ -1,4 +1,5 @@
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -105,6 +106,32 @@ def test_ui_exposes_run_cancel_control(client):
     assert "button:disabled" in style_css
 
 
+def test_ui_exposes_run_history_filters(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert "RUN_HISTORY_FILTERS" in app_js
+    assert '"Stale"' in app_js
+    assert '"Timed out"' in app_js
+    assert '"Over budget"' in app_js
+    assert '"Cancelled"' in app_js
+    assert "runFilterApiPath(id, runFilter)" in app_js
+    assert "`/jobs/${jobId}/runs?stale=true`" in app_js
+    assert "`/jobs/${jobId}/runs?status=${encodeURIComponent(filter)}`" in app_js
+    assert 'await jobDetailView(id, subid || "all")' in app_js
+    assert "No runs match this filter." in app_js
+
+
+def test_ui_run_history_filters_match_api_status_values(client):
+    app_js = client.get("/ui/app.js").text
+
+    match = re.search(r"const RUN_HISTORY_FILTERS = \[(.*?)\];", app_js, re.S)
+    assert match
+    filters = re.findall(r'\["([^"]+)",\s*"[^"]+"\]', match.group(1))
+    api_status_filters = set(filters) - {"all", "stale"}
+
+    assert api_status_filters == {status.value for status in RunStatus}
+
+
 def test_ui_exposes_alert_filters_and_bulk_ack(client):
     index = client.get("/ui/").text
     app_js = client.get("/ui/app.js").text
@@ -161,10 +188,16 @@ def test_ui_exposes_template_job_creation(client):
 
     assert 'api("/templates").catch(() => [])' in app_js
     assert 'class="templatejob"' in app_js
-    assert 'name="payload_${esc(key)}"' in app_js
+    assert "function templatePayloadFields(t)" in app_js
+    assert "Object.keys(t.payload || {})" in app_js
+    assert "const required = new Set(t.required_payload || [])" in app_js
+    assert 'const fieldName = `payload_${esc(key)}`' in app_js
+    assert '<textarea name="${fieldName}" rows="3"${requiredAttr}>' in app_js
     assert "`/jobs/from-template/${encodeURIComponent(form.dataset.template)}`" in app_js
     assert 'location.hash = `#/jobs/${job.id}`' in app_js
     assert ".template-list" in style_css
+    assert "form.templatejob textarea" in style_css
+    assert "form.templatejob label.wide" in style_css
 
 
 def test_ui_custom_job_creation_exposes_core_guard_fields(client):
@@ -357,6 +390,7 @@ def test_jobs_view_uses_overview_attention_counts(client):
     assert "job.unacknowledged_alerts" in app_js
     assert "job.awaiting_approval_runs" in app_js
     assert "job.stale_running_runs" in app_js
+    assert 'href="#/jobs/${encodeURIComponent(job.id)}/stale"' in app_js
     assert "<th>Needs action</th>" in app_js
     assert 'class="attention" data-noclick' in app_js
     assert ".attention-pill.alert" in style_css

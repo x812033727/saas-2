@@ -204,6 +204,8 @@ def test_qa_template_form_submit_trims_payload_and_omits_blank_cron():
       values: {
         name: "  patrol from template  ",
         payload_repo_url: "  https://example.test/repo  ",
+        payload_publish_repo: "  org/repo  ",
+        payload_brief: "  Fix one focused issue.  ",
         cron: " \n\t ",
       },
       handlers: {},
@@ -276,6 +278,11 @@ def test_qa_template_form_submit_trims_payload_and_omits_blank_cron():
             name: "QA Template",
             engine: "ti",
             cron: "0 2 * * *",
+            payload: {
+              repo_url: "",
+              publish_repo: "",
+              brief: "Default brief",
+            },
             required_payload: ["repo_url"],
             description: "exercise the real submit handler",
           }]);
@@ -306,7 +313,11 @@ def test_qa_template_form_submit_trims_payload_and_omits_blank_cron():
       const body = JSON.parse(post.opts.body);
       assert.deepStrictEqual(body, {
         name: "patrol from template",
-        payload: { repo_url: "https://example.test/repo" },
+        payload: {
+          repo_url: "https://example.test/repo",
+          publish_repo: "org/repo",
+          brief: "Fix one focused issue.",
+        },
       });
       assert.strictEqual(context.location.hash, "#/jobs/created-job");
       console.log("QA_TEMPLATE_FORM_OK", JSON.stringify(body));

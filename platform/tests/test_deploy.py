@@ -97,7 +97,7 @@ def test_readme_operating_command_uses_api_server_entrypoint():
     readme = (ROOT / "README.md").read_text()
     operating = readme.split("## Operating it", 1)[1].split("## Tests", 1)[0]
 
-    assert "../.venv/bin/python -m ticloud.api --host" in operating
+    assert ".venv/bin/python -m ticloud.api --host" in operating
     assert "pytest" not in operating
 
 

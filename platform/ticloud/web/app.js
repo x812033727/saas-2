@@ -76,6 +76,33 @@ const TERMINAL_RUN_STATUSES = new Set([
 ]);
 const badge = (status) =>
   `<span class="badge ${esc(status)}"><span class="dot"></span>${esc(STATUS_LABEL[status] || status)}</span>`;
+const RUN_HISTORY_FILTERS = [
+  ["all", "All"],
+  ["queued", "Queued"],
+  ["awaiting_approval", "Approval"],
+  ["running", "Running"],
+  ["stale", "Stale"],
+  ["succeeded", "Succeeded"],
+  ["failed", "Failed"],
+  ["timed_out", "Timed out"],
+  ["budget_exceeded", "Over budget"],
+  ["cancelled", "Cancelled"],
+];
+
+function parseRunFilter(raw = "all") {
+  const id = String(raw || "all");
+  return RUN_HISTORY_FILTERS.some(([key]) => key === id) ? id : "all";
+}
+
+function runFilterRoute(jobId, filter) {
+  return filter === "all" ? `#/jobs/${jobId}` : `#/jobs/${jobId}/${filter}`;
+}
+
+function runFilterApiPath(jobId, filter) {
+  if (filter === "stale") return `/jobs/${jobId}/runs?stale=true`;
+  if (filter !== "all") return `/jobs/${jobId}/runs?status=${encodeURIComponent(filter)}`;
+  return `/jobs/${jobId}/runs`;
+}
 
 function scheduleText(job) {
   if (job.paused) return "paused";
@@ -84,9 +111,23 @@ function scheduleText(job) {
   return "manual only";
 }
 
+function templatePayloadFields(t) {
+  const required = new Set(t.required_payload || []);
+  const keys = Array.from(new Set([...Object.keys(t.payload || {}), ...required]));
+  return keys.map((key) => {
+    const value = t.payload && t.payload[key] != null ? String(t.payload[key]) : "";
+    const requiredAttr = required.has(key) ? " required" : "";
+    const wide = value.length > 60 || value.includes("\n") ? " class=\"wide\"" : "";
+    const fieldName = `payload_${esc(key)}`;
+    if (wide) {
+      return `<label${wide}>${esc(key)} <textarea name="${fieldName}" rows="3"${requiredAttr}>${esc(value)}</textarea></label>`;
+    }
+    return `<label>${esc(key)} <input name="${fieldName}" value="${formValue(value)}"${requiredAttr} placeholder="${esc(key)}"></label>`;
+  }).join("");
+}
+
 function templateForm(t) {
-  const fields = (t.required_payload || []).map((key) => `
-    <label>${esc(key)} <input name="payload_${esc(key)}" required placeholder="${esc(key)}"></label>`).join("");
+  const fields = templatePayloadFields(t);
   return `
     <section class="template-item">
       <div>
@@ -240,7 +281,7 @@ function attentionSummary(job) {
   return `<div class="attention-stack">
     ${alerts ? `<a class="attention-pill alert" href="#/alerts/open/${encodeURIComponent(job.id)}">${alerts} alert${alerts === 1 ? "" : "s"}</a>` : ""}
     ${approvals ? `<a class="attention-pill approval" href="#/approvals">${approvals} approval${approvals === 1 ? "" : "s"}</a>` : ""}
-    ${stale ? `<a class="attention-pill stale" href="#/jobs/${encodeURIComponent(job.id)}">${stale} stuck running</a>` : ""}
+    ${stale ? `<a class="attention-pill stale" href="#/jobs/${encodeURIComponent(job.id)}/stale">${stale} stuck running</a>` : ""}
   </div>`;
 }
 
@@ -394,10 +435,11 @@ async function jobsView() {
   });
 }
 
-async function jobDetailView(id) {
+async function jobDetailView(id, rawRunFilter = "all") {
+  const runFilter = parseRunFilter(rawRunFilter);
   const [job, runs, stats, lessons, modes, cases] = await Promise.all([
     api(`/jobs/${id}`),
-    api(`/jobs/${id}/runs`),
+    api(runFilterApiPath(id, runFilter)),
     api(`/jobs/${id}/stats`),
     api(`/jobs/${id}/lessons`),
     api(`/failure-modes?job_id=${encodeURIComponent(id)}`),
@@ -431,7 +473,7 @@ async function jobDetailView(id) {
       <div class="tile"><div class="k">timeout</div><div class="v">${job.timeout_s}<small> s</small></div></div>
       <div class="tile"><div class="k">max retries</div><div class="v">${job.max_retries}</div></div>
       <div class="tile"><div class="k">approval</div><div class="v">${job.approval_required ? "required" : "off"}</div></div>
-      <div class="tile"><div class="k">runs recorded</div><div class="v">${runs.length}</div></div>
+      <div class="tile"><div class="k">${runFilter === "all" ? "runs recorded" : "runs shown"}</div><div class="v">${runs.length}</div></div>
     </div>
     ${jobSettingsForm(job)}
     <h2>Lessons</h2>
@@ -498,11 +540,15 @@ async function jobDetailView(id) {
       value: (p) => p.steps, format: (v) => `${Math.round(v)}`, label: "steps per run",
     })}</div>
     <h2>Run history</h2>
+    <div class="tabs">
+      ${RUN_HISTORY_FILTERS.map(([key, label]) =>
+        `<a class="${runFilter === key ? "active" : ""}" href="${runFilterRoute(id, key)}">${label}</a>`).join("")}
+    </div>
     <div class="card">
       ${runs.length ? `<table>
         <thead><tr><th>Status</th><th class="num">Attempt</th><th>Scheduled</th><th class="num">Duration</th><th class="num">Score</th><th class="num">Cost</th><th>Note</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table>`
-      : `<div class="empty">No runs yet — trigger one from the jobs list.</div>`}
+      : `<div class="empty">${runFilter === "all" ? "No runs yet — trigger one from the jobs list." : "No runs match this filter."}</div>`}
     </div>
     <div class="actions">
       <button class="primary" data-act="trigger" data-id="${job.id}">Run now</button>
@@ -916,7 +962,7 @@ async function render() {
     else if (view === "approvals") { await approvalsView(); schedulePoll(5000); }
     else if (view === "failures") { await failuresView(id, subid); schedulePoll(6000); }
     else if (view === "alerts") { await alertsView(id || "all", subid || null); schedulePoll(5000); }
-    else if (view === "jobs" && id) { await jobDetailView(id); schedulePoll(3000); }
+    else if (view === "jobs" && id) { await jobDetailView(id, subid || "all"); schedulePoll(3000); }
     else { await jobsView(); schedulePoll(3000); }
   } catch (e) {
     app.innerHTML = `<div class="card"><div class="empty">⚠ ${esc(e.message)}</div></div>`;
