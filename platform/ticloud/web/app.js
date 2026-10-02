@@ -74,6 +74,7 @@ const STATUS_LABEL = {
 const TERMINAL_RUN_STATUSES = new Set([
   "succeeded", "failed", "timed_out", "budget_exceeded", "cancelled",
 ]);
+const RUN_PAGE_SIZE = 50;
 const badge = (status) =>
   `<span class="badge ${esc(status)}"><span class="dot"></span>${esc(STATUS_LABEL[status] || status)}</span>`;
 const RUN_HISTORY_FILTERS = [
@@ -98,10 +99,22 @@ function runFilterRoute(jobId, filter) {
   return filter === "all" ? `#/jobs/${jobId}` : `#/jobs/${jobId}/${filter}`;
 }
 
-function runFilterApiPath(jobId, filter) {
-  if (filter === "stale") return `/jobs/${jobId}/runs?stale=true`;
-  if (filter !== "all") return `/jobs/${jobId}/runs?status=${encodeURIComponent(filter)}`;
-  return `/jobs/${jobId}/runs`;
+function runHistoryPageRoute(jobId, filter, cursor = null) {
+  if (!cursor) return runFilterRoute(jobId, filter);
+  return `#/jobs/${jobId}/${filter}/before/${encodeURIComponent(cursor)}`;
+}
+
+function runFilterApiPath(jobId, filter, cursor = null) {
+  const params = [`limit=${RUN_PAGE_SIZE}`];
+  if (filter === "stale") params.push("stale=true");
+  else if (filter !== "all") params.push(`status=${encodeURIComponent(filter)}`);
+  if (cursor) params.push(`cursor=${encodeURIComponent(cursor)}`);
+  return `/jobs/${jobId}/runs?${params.join("&")}`;
+}
+
+function runHistoryCursor(runs) {
+  const last = runs[runs.length - 1];
+  return last ? `${last.scheduled_at}|${last.id}` : null;
 }
 
 function scheduleText(job) {
@@ -109,6 +122,21 @@ function scheduleText(job) {
   if (job.cron) return `cron ${job.cron}`;
   if (job.interval_seconds) return `every ${job.interval_seconds}s`;
   return "manual only";
+}
+
+function schedulePreviewCard(preview) {
+  const upcoming = preview.upcoming || [];
+  const rows = upcoming.map((iso, index) => `
+    <li>
+      <strong>${index === 0 ? "next" : `#${index + 1}`}</strong>
+      <time datetime="${esc(iso)}">${esc(fmtTime(iso))}</time>
+      <span>${esc(relTime(iso))}</span>
+    </li>`).join("");
+  return `
+    <div class="card schedule-preview">
+      ${preview.paused ? '<span class="badge paused"><span class="dot"></span>paused</span>' : ""}
+      ${upcoming.length ? `<ol>${rows}</ol>` : '<div class="empty">Manual only — no scheduled runs.</div>'}
+    </div>`;
 }
 
 function templatePayloadFields(t) {
@@ -435,11 +463,13 @@ async function jobsView() {
   });
 }
 
-async function jobDetailView(id, rawRunFilter = "all") {
+async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
   const runFilter = parseRunFilter(rawRunFilter);
-  const [job, runs, stats, lessons, modes, cases] = await Promise.all([
+  const runCursor = rawCursor ? decodeURIComponent(rawCursor) : null;
+  const [job, schedulePreview, runs, stats, lessons, modes, cases] = await Promise.all([
     api(`/jobs/${id}`),
-    api(runFilterApiPath(id, runFilter)),
+    api(`/jobs/${id}/schedule-preview?count=5`).catch(() => ({ paused: false, upcoming: [] })),
+    api(runFilterApiPath(id, runFilter, runCursor)),
     api(`/jobs/${id}/stats`),
     api(`/jobs/${id}/lessons`),
     api(`/failure-modes?job_id=${encodeURIComponent(id)}`),
@@ -448,6 +478,12 @@ async function jobDetailView(id, rawRunFilter = "all") {
   const jobCases = cases.filter((c) => c.job_id === id);
   const hasEnabledJobCases = jobCases.some((c) => c.enabled);
   const jobEvalResult = lastEvalJobId === id ? evalResultCard(lastEvalSummary) : "";
+  const olderCursor = runs.length === RUN_PAGE_SIZE ? runHistoryCursor(runs) : null;
+  const historyPager = `
+    <div class="history-pager">
+      ${runCursor ? `<a class="button" href="${runFilterRoute(id, runFilter)}">Newest runs</a>` : ""}
+      ${olderCursor ? `<a class="button" href="${runHistoryPageRoute(id, runFilter, olderCursor)}">Load older runs</a>` : ""}
+    </div>`;
   const rows = runs.map((r) => {
     const stale = isStaleRunning(r, job);
     const note = (r.error || "").split("\n").pop() || (r.result && r.result.summary) || "";
@@ -473,8 +509,10 @@ async function jobDetailView(id, rawRunFilter = "all") {
       <div class="tile"><div class="k">timeout</div><div class="v">${job.timeout_s}<small> s</small></div></div>
       <div class="tile"><div class="k">max retries</div><div class="v">${job.max_retries}</div></div>
       <div class="tile"><div class="k">approval</div><div class="v">${job.approval_required ? "required" : "off"}</div></div>
-      <div class="tile"><div class="k">${runFilter === "all" ? "runs recorded" : "runs shown"}</div><div class="v">${runs.length}</div></div>
+      <div class="tile"><div class="k">${runFilter === "all" && !runCursor ? "runs recorded" : "runs shown"}</div><div class="v">${runs.length}</div></div>
     </div>
+    <h2>Upcoming schedule</h2>
+    ${schedulePreviewCard(schedulePreview)}
     ${jobSettingsForm(job)}
     <h2>Lessons</h2>
     <div class="card">
@@ -544,12 +582,14 @@ async function jobDetailView(id, rawRunFilter = "all") {
       ${RUN_HISTORY_FILTERS.map(([key, label]) =>
         `<a class="${runFilter === key ? "active" : ""}" href="${runFilterRoute(id, key)}">${label}</a>`).join("")}
     </div>
+    ${runCursor ? '<div class="sub">showing older runs</div>' : ""}
     <div class="card">
       ${runs.length ? `<table>
         <thead><tr><th>Status</th><th class="num">Attempt</th><th>Scheduled</th><th class="num">Duration</th><th class="num">Score</th><th class="num">Cost</th><th>Note</th><th></th></tr></thead>
         <tbody>${rows}</tbody></table>`
-      : `<div class="empty">${runFilter === "all" ? "No runs yet — trigger one from the jobs list." : "No runs match this filter."}</div>`}
+      : `<div class="empty">${runCursor ? "No older runs." : runFilter === "all" ? "No runs yet — trigger one from the jobs list." : "No runs match this filter."}</div>`}
     </div>
+    ${historyPager}
     <div class="actions">
       <button class="primary" data-act="trigger" data-id="${job.id}">Run now</button>
       <button data-act="${job.paused ? "resume" : "pause"}" data-id="${job.id}">${job.paused ? "Resume" : "Pause"}</button>
@@ -954,7 +994,7 @@ function schedulePoll(ms) {
 async function render() {
   clearTimeout(pollTimer);
   const hash = location.hash || "#/jobs";
-  const [, view, id, subid] = hash.split("/");
+  const [, view, id, subid, cursorMarker, cursor] = hash.split("/");
   refreshAlertCount();
   try {
     if (view === "runs" && id) await runDetailView(id);
@@ -962,7 +1002,10 @@ async function render() {
     else if (view === "approvals") { await approvalsView(); schedulePoll(5000); }
     else if (view === "failures") { await failuresView(id, subid); schedulePoll(6000); }
     else if (view === "alerts") { await alertsView(id || "all", subid || null); schedulePoll(5000); }
-    else if (view === "jobs" && id) { await jobDetailView(id, subid || "all"); schedulePoll(3000); }
+    else if (view === "jobs" && id) {
+      await jobDetailView(id, subid || "all", cursorMarker === "before" ? cursor : null);
+      schedulePoll(3000);
+    }
     else { await jobsView(); schedulePoll(3000); }
   } catch (e) {
     app.innerHTML = `<div class="card"><div class="empty">⚠ ${esc(e.message)}</div></div>`;

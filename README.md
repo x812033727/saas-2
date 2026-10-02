@@ -124,6 +124,8 @@ curl -X POST localhost:8000/jobs -H 'content-type: application/json' -d '{
 After fixing a failed job's config/payload, queue a fresh attempt without
 losing the original trace from the run detail page's **Rerun** button, or
 with `POST /runs/{run_id}/rerun`.
+Preview a job's upcoming schedule with
+`GET /jobs/{job_id}/schedule-preview?count=5`.
 
 ## Job templates
 
