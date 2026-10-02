@@ -333,3 +333,346 @@ def test_qa_job_settings_form_patches_payload_and_clears_blank_optionals():
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "QA_JOB_SETTINGS_FORM_OK" in result.stdout
+
+
+def test_qa_job_detail_eval_case_form_posts_current_job_and_blocks_bad_json():
+    script = r"""
+    const assert = require("assert");
+    const fs = require("fs");
+    const vm = require("vm");
+
+    const calls = [];
+    let toastEl = null;
+    const jobEvalCaseForm = {
+      values: {
+        name: "  qa-job-regression  ",
+        engine: "ti",
+        min_score: "0.65",
+        payload: "[1,2,3]",
+      },
+      handlers: {},
+      addEventListener(type, handler) { this.handlers[type] = handler; },
+    };
+    const jobSettingsForm = { addEventListener() {} };
+    const lessonForm = { addEventListener() {} };
+    const appEl = { innerHTML: "", addEventListener() {} };
+    const alertCount = {};
+
+    class FakeFormData {
+      constructor(form) { this.form = form; }
+      get(key) { return this.form.values[key]; }
+      entries() { return Object.entries(this.form.values); }
+    }
+
+    function response(status, body) {
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: String(status),
+        json: async () => body,
+      };
+    }
+
+    const job = {
+      id: "job-1",
+      name: "qa-job",
+      engine: "offline",
+      paused: false,
+      cron: null,
+      interval_seconds: null,
+      payload: { repo_url: "https://example.test/repo", branch: "main" },
+      budget_usd: 5,
+      timeout_s: 1800,
+      max_retries: 2,
+      retry_backoff_s: 0,
+      score_threshold: 0.8,
+      on_low_score: "alert",
+      webhook_url: null,
+      approval_required: false,
+      next_run_at: null,
+    };
+
+    const context = {
+      console,
+      Date,
+      JSON,
+      Math,
+      Number,
+      String,
+      Set,
+      Promise,
+      encodeURIComponent,
+      clearTimeout() {},
+      setTimeout() { return 1; },
+      localStorage: { getItem() { return null; }, setItem() {} },
+      prompt() { return ""; },
+      location: { hash: "#/jobs/job-1" },
+      window: { addEventListener() {}, EventSource: undefined },
+      FormData: FakeFormData,
+      document: {
+        hidden: false,
+        activeElement: null,
+        body: { append() {} },
+        addEventListener() {},
+        createElement() {
+          toastEl = {
+            className: "",
+            textContent: "",
+            classList: { add() {}, remove() {} },
+          };
+          return toastEl;
+        },
+        querySelector(selector) { return selector === ".toast" ? toastEl : null; },
+        querySelectorAll(selector) {
+          return selector === ".lessonedit" ? [] : [];
+        },
+        getElementById(id) {
+          if (id === "app") return appEl;
+          if (id === "alert-count") return alertCount;
+          if (id === "jobsettings") return jobSettingsForm;
+          if (id === "lessonform") return lessonForm;
+          if (id === "jobevalcase") return jobEvalCaseForm;
+          return null;
+        },
+      },
+      fetch: async (path, opts = {}) => {
+        calls.push({ path, opts });
+        if (path === "/alerts/summary") return response(200, { unacknowledged: 0 });
+        if (path === "/jobs/job-1") return response(200, job);
+        if (path === "/jobs/job-1/runs") return response(200, []);
+        if (path === "/jobs/job-1/stats") return response(200, []);
+        if (path === "/jobs/job-1/lessons") return response(200, []);
+        if (path === "/failure-modes?job_id=job-1") return response(200, []);
+        if (path === "/eval-cases" && opts.method === "POST") {
+          return response(201, { id: "case-1" });
+        }
+        if (path === "/eval-cases") return response(200, []);
+        return response(404, { detail: `unexpected ${path}` });
+      },
+    };
+    context.globalThis = context;
+
+    (async () => {
+      const code = fs.readFileSync("ticloud/web/app.js", "utf8");
+      vm.runInNewContext(code, context, { filename: "app.js" });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.strictEqual(typeof jobEvalCaseForm.handlers.submit, "function");
+      await jobEvalCaseForm.handlers.submit({ preventDefault() {}, target: jobEvalCaseForm });
+      assert.strictEqual(
+        calls.filter((call) => call.path === "/eval-cases" && call.opts.method === "POST").length,
+        0,
+        "invalid payload JSON should not create a job-scoped eval case",
+      );
+      assert.strictEqual(toastEl.textContent, "payload must be a JSON object");
+
+      jobEvalCaseForm.values.payload = '{"repo_url":"https://example.test/override","steps":["qa"]}';
+      await jobEvalCaseForm.handlers.submit({ preventDefault() {}, target: jobEvalCaseForm });
+
+      const posts = calls.filter((call) => call.path === "/eval-cases" && call.opts.method === "POST");
+      assert.strictEqual(posts.length, 1);
+      const body = JSON.parse(posts[0].opts.body);
+      assert.deepStrictEqual(body, {
+        name: "qa-job-regression",
+        engine: "ti",
+        min_score: 0.65,
+        payload: {
+          repo_url: "https://example.test/override",
+          steps: ["qa"],
+        },
+        job_id: "job-1",
+      });
+      assert.strictEqual(context.location.hash, "#/jobs/job-1");
+      console.log("QA_JOB_EVAL_CASE_FORM_OK", JSON.stringify(body));
+    })().catch((err) => {
+      console.error(err && err.stack ? err.stack : err);
+      process.exit(1);
+    });
+    """
+
+    result = _run_node(script)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "QA_JOB_EVAL_CASE_FORM_OK" in result.stdout
+
+
+def test_qa_run_detail_eval_case_form_posts_run_job_and_redirects_after_success():
+    script = r"""
+    const assert = require("assert");
+    const fs = require("fs");
+    const vm = require("vm");
+
+    const calls = [];
+    let toastEl = null;
+    const runEvalCaseForm = {
+      values: {
+        name: "  qa-run-regression  ",
+        engine: "offline",
+        min_score: "0.72",
+        payload: "[]",
+      },
+      handlers: {},
+      addEventListener(type, handler) { this.handlers[type] = handler; },
+    };
+    const jobEvalCaseForm = { addEventListener() {} };
+    const jobSettingsForm = { addEventListener() {} };
+    const lessonForm = { addEventListener() {} };
+    const appEl = { innerHTML: "", addEventListener() {} };
+    const alertCount = {};
+
+    class FakeFormData {
+      constructor(form) { this.form = form; }
+      get(key) { return this.form.values[key]; }
+      entries() { return Object.entries(this.form.values); }
+    }
+
+    function response(status, body) {
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: String(status),
+        json: async () => body,
+      };
+    }
+
+    const job = {
+      id: "job-1",
+      name: "qa-run-job",
+      engine: "offline",
+      paused: false,
+      cron: null,
+      interval_seconds: null,
+      payload: { repo_url: "https://example.test/run-source", prompt: "debug me" },
+      budget_usd: 5,
+      timeout_s: 1800,
+      max_retries: 2,
+      retry_backoff_s: 0,
+      score_threshold: 0.72,
+      on_low_score: "alert",
+      webhook_url: null,
+      approval_required: false,
+      next_run_at: null,
+    };
+    const run = {
+      id: "run-abcdef123456",
+      job_id: "job-1",
+      status: "failed",
+      attempt: 2,
+      scheduled_at: "2026-10-03T00:00:00Z",
+      started_at: "2026-10-03T00:00:01Z",
+      finished_at: "2026-10-03T00:00:03Z",
+      score: 0.2,
+      cost_usd: 0.0123,
+      tokens_in: 12,
+      tokens_out: 34,
+      steps: [],
+      scores: [],
+      result: null,
+      error: "boom",
+      cancel_requested: false,
+    };
+
+    const context = {
+      console,
+      Date,
+      JSON,
+      Math,
+      Number,
+      String,
+      Set,
+      Promise,
+      encodeURIComponent,
+      clearTimeout() {},
+      setTimeout() { return 1; },
+      localStorage: { getItem() { return null; }, setItem() {} },
+      prompt() { return ""; },
+      location: { hash: "#/runs/run-abcdef123456" },
+      window: { addEventListener() {}, EventSource: undefined },
+      FormData: FakeFormData,
+      document: {
+        hidden: false,
+        activeElement: null,
+        body: { append() {} },
+        addEventListener() {},
+        createElement() {
+          toastEl = {
+            className: "",
+            textContent: "",
+            classList: { add() {}, remove() {} },
+          };
+          return toastEl;
+        },
+        querySelector(selector) { return selector === ".toast" ? toastEl : null; },
+        querySelectorAll(selector) {
+          return selector === ".lessonedit" ? [] : [];
+        },
+        getElementById(id) {
+          if (id === "app") return appEl;
+          if (id === "alert-count") return alertCount;
+          if (id === "runevalcase") return runEvalCaseForm;
+          if (id === "jobsettings") return jobSettingsForm;
+          if (id === "lessonform") return lessonForm;
+          if (id === "jobevalcase") return jobEvalCaseForm;
+          return null;
+        },
+      },
+      fetch: async (path, opts = {}) => {
+        calls.push({ path, opts });
+        if (path === "/alerts/summary") return response(200, { unacknowledged: 0 });
+        if (path === "/runs/run-abcdef123456") return response(200, run);
+        if (path === "/jobs/job-1") return response(200, job);
+        if (path === "/jobs/job-1/lessons") return response(200, []);
+        if (path === "/eval-cases" && opts.method === "POST") {
+          return response(201, { id: "case-from-run" });
+        }
+        if (path === "/jobs/job-1/runs") return response(200, []);
+        if (path === "/jobs/job-1/stats") return response(200, []);
+        if (path === "/failure-modes?job_id=job-1") return response(200, []);
+        if (path === "/eval-cases") return response(200, []);
+        return response(404, { detail: `unexpected ${path}` });
+      },
+    };
+    context.globalThis = context;
+
+    (async () => {
+      const code = fs.readFileSync("ticloud/web/app.js", "utf8");
+      vm.runInNewContext(code, context, { filename: "app.js" });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert.strictEqual(typeof runEvalCaseForm.handlers.submit, "function");
+      await runEvalCaseForm.handlers.submit({ preventDefault() {}, target: runEvalCaseForm });
+      assert.strictEqual(
+        calls.filter((call) => call.path === "/eval-cases" && call.opts.method === "POST").length,
+        0,
+        "invalid payload JSON should not create a run-scoped eval case",
+      );
+      assert.strictEqual(toastEl.textContent, "payload must be a JSON object");
+
+      runEvalCaseForm.values.payload = '{"repo_url":"https://example.test/run-source","prompt":"replay failure"}';
+      await runEvalCaseForm.handlers.submit({ preventDefault() {}, target: runEvalCaseForm });
+
+      const posts = calls.filter((call) => call.path === "/eval-cases" && call.opts.method === "POST");
+      assert.strictEqual(posts.length, 1);
+      const body = JSON.parse(posts[0].opts.body);
+      assert.deepStrictEqual(body, {
+        name: "qa-run-regression",
+        engine: "offline",
+        min_score: 0.72,
+        payload: {
+          repo_url: "https://example.test/run-source",
+          prompt: "replay failure",
+        },
+        job_id: "job-1",
+      });
+      assert.strictEqual(context.location.hash, "#/jobs/job-1");
+      console.log("QA_RUN_EVAL_CASE_FORM_OK", JSON.stringify(body));
+    })().catch((err) => {
+      console.error(err && err.stack ? err.stack : err);
+      process.exit(1);
+    });
+    """
+
+    result = _run_node(script)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "QA_RUN_EVAL_CASE_FORM_OK" in result.stdout
