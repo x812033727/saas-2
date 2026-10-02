@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from ticloud.models import Job, Run, RunStatus
-from ticloud.scheduler.cron import compute_next_run
+from ticloud.scheduler.cron import compute_next_run, compute_next_runs
 from ticloud.scheduler.queue import claim_next_run, enqueue_due_jobs, enqueue_manual
 
 
@@ -40,8 +40,20 @@ def test_interval_next_run():
     assert compute_next_run(job, after=after) == after + timedelta(seconds=900)
 
 
+def test_compute_next_runs_preview():
+    job = Job(name="j", interval_seconds=900)
+    after = datetime(2026, 7, 16, tzinfo=timezone.utc)
+
+    assert compute_next_runs(job, count=3, after=after) == [
+        after + timedelta(seconds=900),
+        after + timedelta(seconds=1800),
+        after + timedelta(seconds=2700),
+    ]
+
+
 def test_manual_only_job_has_no_next_run():
     assert compute_next_run(Job(name="j")) is None
+    assert compute_next_runs(Job(name="j"), count=3) == []
 
 
 def test_enqueue_due_jobs_advances_schedule(session):

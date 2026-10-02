@@ -114,11 +114,28 @@ def test_ui_exposes_run_history_filters(client):
     assert '"Timed out"' in app_js
     assert '"Over budget"' in app_js
     assert '"Cancelled"' in app_js
-    assert "runFilterApiPath(id, runFilter)" in app_js
-    assert "`/jobs/${jobId}/runs?stale=true`" in app_js
-    assert "`/jobs/${jobId}/runs?status=${encodeURIComponent(filter)}`" in app_js
-    assert 'await jobDetailView(id, subid || "all")' in app_js
+    assert "runFilterApiPath(id, runFilter, runCursor)" in app_js
+    assert 'params.push("stale=true")' in app_js
+    assert "params.push(`status=${encodeURIComponent(filter)}`)" in app_js
+    assert 'await jobDetailView(id, subid || "all", cursorMarker === "before" ? cursor : null)' in app_js
     assert "No runs match this filter." in app_js
+
+
+def test_ui_exposes_run_history_pagination(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert "const RUN_PAGE_SIZE = 50" in app_js
+    assert "function runHistoryPageRoute(jobId, filter, cursor = null)" in app_js
+    assert "function runHistoryCursor(runs)" in app_js
+    assert "const params = [`limit=${RUN_PAGE_SIZE}`]" in app_js
+    assert "params.push(`cursor=${encodeURIComponent(cursor)}`)" in app_js
+    assert "runs.length === RUN_PAGE_SIZE ? runHistoryCursor(runs) : null" in app_js
+    assert 'href="${runHistoryPageRoute(id, runFilter, olderCursor)}"' in app_js
+    assert 'href="${runFilterRoute(id, runFilter)}">Newest runs</a>' in app_js
+    assert 'cursorMarker === "before" ? cursor : null' in app_js
+    assert ".history-pager" in style_css
+    assert ".button:hover" in style_css
 
 
 def test_ui_run_history_filters_match_api_status_values(client):
@@ -167,6 +184,18 @@ def test_ui_exposes_job_settings_editor(client):
     assert "`/jobs/${id}`" in app_js
     assert 'name="approval_required"' in app_js
     assert 'name="webhook_url"' in app_js
+
+
+def test_ui_exposes_job_schedule_preview(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert "function schedulePreviewCard(preview)" in app_js
+    assert "`/jobs/${id}/schedule-preview?count=5`" in app_js
+    assert "${schedulePreviewCard(schedulePreview)}" in app_js
+    assert "Upcoming schedule" in app_js
+    assert ".schedule-preview ol" in style_css
+    assert ".schedule-preview time" in style_css
 
 
 def test_ui_exposes_job_delete_control(client):

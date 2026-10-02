@@ -275,7 +275,7 @@ def test_qa_job_settings_form_patches_payload_and_clears_blank_optionals():
         calls.push({ path, opts });
         if (path === "/alerts/summary") return response(200, { unacknowledged: 0 });
         if (path === "/jobs/job-1") return response(200, job);
-        if (path === "/jobs/job-1/runs") return response(200, []);
+        if (path === "/jobs/job-1/runs?limit=50") return response(200, []);
         if (path === "/jobs/job-1/stats") return response(200, []);
         if (path === "/jobs/job-1/lessons") return response(200, []);
         if (path === "/failure-modes?job_id=job-1") return response(200, []);

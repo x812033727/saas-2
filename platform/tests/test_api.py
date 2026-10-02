@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy.exc import SQLAlchemyError
 
 from ticloud.api.main import app, db
@@ -142,6 +144,48 @@ def test_update_job_requires_clearing_existing_schedule(client):
     assert switched.json()["cron"] is None
     assert switched.json()["interval_seconds"] == 3600
     assert switched.json()["next_run_at"] is not None
+
+
+def test_schedule_preview_uses_current_job_anchor(client):
+    job = create_job(client, cron=None, interval_seconds=900)
+
+    resp = client.get(f"/jobs/{job['id']}/schedule-preview?count=3")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    upcoming = [datetime.fromisoformat(ts) for ts in body["upcoming"]]
+    assert body["job_id"] == job["id"]
+    assert body["next_run_at"] == job["next_run_at"]
+    assert body["paused"] is False
+    assert len(upcoming) == 3
+    assert upcoming[0] == datetime.fromisoformat(job["next_run_at"])
+    assert upcoming[1] - upcoming[0] == upcoming[2] - upcoming[1]
+
+
+def test_schedule_preview_after_overrides_current_anchor(client):
+    job = create_job(client, cron=None, interval_seconds=900)
+    after = datetime(2026, 7, 16, tzinfo=timezone.utc)
+
+    resp = client.get(
+        f"/jobs/{job['id']}/schedule-preview",
+        params={"count": 2, "after": after.isoformat()},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert [datetime.fromisoformat(ts) for ts in resp.json()["upcoming"]] == [
+        after.replace(minute=15),
+        after.replace(minute=30),
+    ]
+
+
+def test_schedule_preview_manual_only_job_is_empty(client):
+    job = create_job(client, cron=None)
+
+    resp = client.get(f"/jobs/{job['id']}/schedule-preview")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["next_run_at"] is None
+    assert resp.json()["upcoming"] == []
 
 
 def test_update_job_strips_and_rejects_blank_name(client):

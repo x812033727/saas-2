@@ -211,6 +211,13 @@ class JobOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SchedulePreviewOut(BaseModel):
+    job_id: str
+    paused: bool
+    next_run_at: datetime | None
+    upcoming: list[datetime] = Field(default_factory=list)
+
+
 class RunStepOut(BaseModel):
     index: int
     role: str

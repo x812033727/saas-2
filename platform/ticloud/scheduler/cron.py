@@ -24,5 +24,22 @@ def compute_next_run(job: Job, after: datetime | None = None) -> datetime | None
     return None
 
 
+def compute_next_runs(
+    job: Job, count: int = 5, after: datetime | None = None
+) -> list[datetime]:
+    """Preview the next scheduled fire times for a job."""
+    if count <= 0:
+        return []
+    runs: list[datetime] = []
+    anchor = after
+    for _ in range(count):
+        nxt = compute_next_run(job, after=anchor)
+        if nxt is None:
+            break
+        runs.append(nxt)
+        anchor = nxt
+    return runs
+
+
 def validate_cron(expr: str) -> bool:
     return croniter.is_valid(expr)

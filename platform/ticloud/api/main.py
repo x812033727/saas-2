@@ -42,7 +42,7 @@ from ..models import (
     Tenant,
     utcnow,
 )
-from ..scheduler.cron import compute_next_run
+from ..scheduler.cron import compute_next_run, compute_next_runs
 from ..scheduler.queue import enqueue_manual, enqueue_rerun
 from .auth import generate_key, hash_key, make_current_tenant, require_admin
 from .schemas import (
@@ -68,6 +68,7 @@ from .schemas import (
     PromoteRequest,
     RunDetailOut,
     RunOut,
+    SchedulePreviewOut,
     RunStatPoint,
     TemplateInstantiate,
     TemplateOut,
@@ -465,6 +466,28 @@ def get_job(
     tenant: Tenant | None = Depends(current_tenant),
 ) -> Job:
     return _get_job(session, job_id, tenant)
+
+
+@app.get("/jobs/{job_id}/schedule-preview", response_model=SchedulePreviewOut)
+def schedule_preview(
+    job_id: str,
+    count: int = Query(5, ge=1, le=20),
+    after: datetime | None = None,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> SchedulePreviewOut:
+    job = _get_job(session, job_id, tenant)
+    if after is None and job.next_run_at is not None:
+        upcoming = [job.next_run_at]
+        upcoming.extend(compute_next_runs(job, count=count - 1, after=job.next_run_at))
+    else:
+        upcoming = compute_next_runs(job, count=count, after=after)
+    return SchedulePreviewOut(
+        job_id=job.id,
+        paused=job.paused,
+        next_run_at=job.next_run_at,
+        upcoming=upcoming,
+    )
 
 
 _SCHEDULE_FIELDS = {"cron", "interval_seconds"}
