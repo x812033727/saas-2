@@ -49,6 +49,23 @@ def _cancel_requested(run_id: str) -> bool:
         s.close()
 
 
+def _raise_approval_alert_once(session, run: Run) -> None:
+    existing = session.scalar(
+        select(Alert.id)
+        .where(Alert.run_id == run.id, Alert.kind == "approval_required")
+        .limit(1)
+    )
+    if existing is not None:
+        return
+    raise_alert(
+        session,
+        run.job_id,
+        kind="approval_required",
+        message=f"job '{run.job.name}' run is awaiting approval before it runs",
+        run_id=run.id,
+    )
+
+
 def execute_run(run_id: str) -> RunStatus:
     """Execute one claimed run to a terminal status. Returns the status."""
     session = get_session()
@@ -63,13 +80,7 @@ def execute_run(run_id: str) -> RunStatus:
             run.status = RunStatus.AWAITING_APPROVAL
             run.approval_state = "pending"
             session.commit()
-            raise_alert(
-                session,
-                job.id,
-                kind="approval_required",
-                message=f"job '{job.name}' run is awaiting approval before it runs",
-                run_id=run.id,
-            )
+            _raise_approval_alert_once(session, run)
             log.info("run %s awaiting approval", run.id)
             return RunStatus.AWAITING_APPROVAL
         if run.status != RunStatus.RUNNING:  # direct execution without a claim

@@ -1031,6 +1031,17 @@ def _get_run(session: Session, run_id: str, tenant: Tenant | None) -> Run:
     return run
 
 
+def _ack_approval_alerts(session: Session, run: Run) -> None:
+    for alert in session.scalars(
+        select(Alert).where(
+            Alert.run_id == run.id,
+            Alert.kind == "approval_required",
+            Alert.acknowledged.is_(False),
+        )
+    ):
+        alert.acknowledged = True
+
+
 @app.get("/runs/{run_id}", response_model=RunDetailOut)
 def get_run(
     run_id: str,
@@ -1114,6 +1125,8 @@ def cancel_run(
     if run.status in TERMINAL_STATUSES:
         raise HTTPException(409, f"run already {run.status.value}")
     if run.status in (RunStatus.QUEUED, RunStatus.AWAITING_APPROVAL):
+        if run.status == RunStatus.AWAITING_APPROVAL:
+            _ack_approval_alerts(session, run)
         run.status = RunStatus.CANCELLED
         run.error = "cancelled by user"
         run.finished_at = datetime.now(timezone.utc)
@@ -1142,13 +1155,24 @@ def rerun_run(
 
 @app.get("/approvals", response_model=list[RunOut])
 def list_approvals(
-    session: Session = Depends(db), tenant: Tenant | None = Depends(current_tenant)
+    limit: int = Query(100, ge=1, le=200),
+    cursor: str | None = None,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
 ) -> list[Run]:
-    """Runs held for human approval (the approvals queue)."""
+    """Runs held for human approval, newest first.
+
+    Paginate with `cursor` = the last row's "<scheduled_at>|<id>".
+    """
     stmt = select(Run).where(Run.status == RunStatus.AWAITING_APPROVAL)
     if tenant is not None:
         stmt = stmt.where(Run.job_id.in_(_tenant_job_ids(session, tenant)))
-    return session.scalars(stmt.order_by(Run.scheduled_at.desc())).all()
+    keyset = _keyset_before(Run.scheduled_at, Run.id, cursor)
+    if keyset is not None:
+        stmt = stmt.where(keyset)
+    return session.scalars(
+        stmt.order_by(Run.scheduled_at.desc(), Run.id.desc()).limit(limit)
+    ).all()
 
 
 @app.post("/runs/{run_id}/approve", response_model=RunOut)
@@ -1161,6 +1185,7 @@ def approve_run(
     run = _get_run(session, run_id, tenant)
     if run.status != RunStatus.AWAITING_APPROVAL:
         raise HTTPException(409, "run is not awaiting approval")
+    _ack_approval_alerts(session, run)
     run.approval_state = "approved"
     run.status = RunStatus.QUEUED
     run.scheduled_at = datetime.now(timezone.utc)  # claimable immediately
@@ -1178,6 +1203,7 @@ def reject_run(
     run = _get_run(session, run_id, tenant)
     if run.status != RunStatus.AWAITING_APPROVAL:
         raise HTTPException(409, "run is not awaiting approval")
+    _ack_approval_alerts(session, run)
     run.approval_state = "rejected"
     run.status = RunStatus.CANCELLED
     run.error = "rejected by reviewer"
