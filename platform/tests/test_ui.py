@@ -338,6 +338,9 @@ def test_ui_exposes_eval_case_editor(client):
     assert "function evalCaseRows(c)" in app_js
     assert 'class="evalcase-edit"' in app_js
     assert 'data-case="${esc(c.id)}"' in app_js
+    assert 'class="danger" data-delcase="${esc(c.id)}" data-name="${esc(c.name)}"' in app_js
+    assert 'confirm(`Delete eval case "${name}"?`)' in app_js
+    assert 'act("DELETE", `/eval-cases/${delBtn.dataset.delcase}`, render)' in app_js
     assert 'api(`/eval-cases/${form.dataset.case}`, {' in app_js
     assert 'method: "PATCH"' in app_js
     assert 'enabled: f.get("enabled") === "on"' in app_js
@@ -345,6 +348,28 @@ def test_ui_exposes_eval_case_editor(client):
     assert "jobCases.map(evalCaseRows).join" in app_js
     assert "form.evalcase-edit" in style_css
     assert "tr.case-edit-row td" in style_css
+
+
+def test_ui_exposes_job_scoped_eval_case_creation(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert 'id="jobevalcase"' in app_js
+    assert 'placeholder="${formValue(job.name)}-regression"' in app_js
+    assert "JSON.stringify(job.payload || {}, null, 2)" in app_js
+    assert "job_id: id" in app_js
+    assert 'await api("/eval-cases", { method: "POST", body: JSON.stringify(body) })' in app_js
+    assert 'toast("eval case created")' in app_js
+
+
+def test_ui_exposes_run_scoped_eval_case_creation(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert "api(`/jobs/${run.job_id}`)" in app_js
+    assert 'id="runevalcase"' in app_js
+    assert '${esc(job.name)}-${esc(run.id.slice(0, 8))}-regression' in app_js
+    assert "JSON.stringify(job.payload || {}, null, 2)" in app_js
+    assert "job_id: run.job_id" in app_js
+    assert "location.hash = `#/jobs/${run.job_id}`" in app_js
 
 
 def test_ui_exposes_eval_gate_runner(client):

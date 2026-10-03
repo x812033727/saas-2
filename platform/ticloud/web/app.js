@@ -197,7 +197,7 @@ function evalCaseRows(c) {
       <td>${source}</td>
       <td class="actions">
         <button data-togglecase="${esc(c.id)}" data-enabled="${c.enabled ? "false" : "true"}">${c.enabled ? "Disable" : "Enable"}</button>
-        <button data-delcase="${esc(c.id)}">Delete</button>
+        <button class="danger" data-delcase="${esc(c.id)}" data-name="${esc(c.name)}">Delete</button>
       </td>
     </tr>
     <tr class="case-edit-row">
@@ -558,6 +558,18 @@ async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
       <button class="primary" data-runevals data-job="${esc(job.id)}" ${hasEnabledJobCases ? "" : "disabled"}>Run job evals</button>
     </div>
     ${jobEvalResult}
+    <details class="panel">
+      <summary>＋ New eval case</summary>
+      <div class="card">
+        <form class="evalcase" id="jobevalcase">
+          <label>name <input name="name" required placeholder="${formValue(job.name)}-regression"></label>
+          <label>engine <select name="engine"><option ${job.engine === "offline" ? "selected" : ""}>offline</option><option ${job.engine === "ti" ? "selected" : ""}>ti</option></select></label>
+          <label>min score <input name="min_score" type="number" step="0.05" min="0" max="1" value="${formValue(job.score_threshold ?? 0.9)}"></label>
+          <label class="wide">payload JSON <textarea name="payload" spellcheck="false">${esc(JSON.stringify(job.payload || {}, null, 2))}</textarea></label>
+          <button class="primary submit" type="submit">Create eval case</button>
+        </form>
+      </div>
+    </details>
     <div class="card">
       ${jobCases.length ? `<table>
         <thead><tr><th>Name</th><th>Engine</th><th class="num">Min score</th><th>Source</th><th></th></tr></thead>
@@ -658,6 +670,27 @@ async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
       render();
     } catch (e) { toast(e.message); }
   }));
+
+  document.getElementById("jobevalcase").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    let payload;
+    try { payload = parseJsonObject(f.get("payload"), "payload"); }
+    catch (e) { toast(e.message); return; }
+    const body = {
+      name: String(f.get("name") || "").trim(),
+      engine: f.get("engine"),
+      min_score: Number(f.get("min_score")),
+      payload,
+      job_id: id,
+    };
+    try {
+      await api("/eval-cases", { method: "POST", body: JSON.stringify(body) });
+      clearEvalResult();
+      toast("eval case created");
+      render();
+    } catch (e) { toast(e.message); }
+  });
 }
 
 function stepRow(s) {
@@ -675,7 +708,10 @@ function stepRow(s) {
 
 async function runDetailView(id) {
   const run = await api(`/runs/${id}`);
-  const lessons = await api(`/jobs/${run.job_id}/lessons`).catch(() => []);
+  const [job, lessons] = await Promise.all([
+    api(`/jobs/${run.job_id}`),
+    api(`/jobs/${run.job_id}/lessons`).catch(() => []),
+  ]);
   const steps = run.steps.map(stepRow).join("");
   const canRerun = TERMINAL_RUN_STATUSES.has(run.status);
   const canCancel = !canRerun && run.status !== "awaiting_approval";
@@ -717,9 +753,43 @@ async function runDetailView(id) {
         <span class="meta">${relTime(l.updated_at)}</span>
       </div>`).join("")}</div>` : ""}
     ${run.error ? `<h2>Error</h2><div class="error-box">${esc(run.error)}</div>` : ""}
+    <details class="panel">
+      <summary>＋ New eval case from this run</summary>
+      <div class="card">
+        <form class="evalcase" id="runevalcase">
+          <label>name <input name="name" required value="${esc(job.name)}-${esc(run.id.slice(0, 8))}-regression"></label>
+          <label>engine <select name="engine"><option ${job.engine === "offline" ? "selected" : ""}>offline</option><option ${job.engine === "ti" ? "selected" : ""}>ti</option></select></label>
+          <label>min score <input name="min_score" type="number" step="0.05" min="0" max="1" value="${formValue(job.score_threshold ?? 0.9)}"></label>
+          <label class="wide">payload JSON <textarea name="payload" spellcheck="false">${esc(JSON.stringify(job.payload || {}, null, 2))}</textarea></label>
+          <button class="primary submit" type="submit">Create eval case</button>
+        </form>
+      </div>
+    </details>
     <h2>Trace</h2>
     <div class="card" id="trace">${steps || '<div class="empty">no steps recorded yet</div>'}</div>
     ${approvalActions || cancelAction || rerunAction ? `<div class="actions">${approvalActions}${cancelAction}${rerunAction}</div>` : ""}`;
+
+  document.getElementById("runevalcase").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    let payload;
+    try { payload = parseJsonObject(f.get("payload"), "payload"); }
+    catch (e) { toast(e.message); return; }
+    const body = {
+      name: String(f.get("name") || "").trim(),
+      engine: f.get("engine"),
+      min_score: Number(f.get("min_score")),
+      payload,
+      job_id: run.job_id,
+    };
+    try {
+      await api("/eval-cases", { method: "POST", body: JSON.stringify(body) });
+      clearEvalResult();
+      toast("eval case created");
+      location.hash = `#/jobs/${run.job_id}`;
+      render();
+    } catch (e) { toast(e.message); }
+  });
 
   // Live trace: stream new steps over SSE while the run is in flight, so the
   // workshop grows before your eyes. Falls back to polling if SSE fails
@@ -1084,6 +1154,8 @@ app.addEventListener("click", (ev) => {
   const delBtn = ev.target.closest("button[data-delcase]");
   if (delBtn) {
     ev.stopPropagation();
+    const name = delBtn.dataset.name || delBtn.dataset.delcase;
+    if (!confirm(`Delete eval case "${name}"?`)) return;
     clearEvalResult();
     act("DELETE", `/eval-cases/${delBtn.dataset.delcase}`, render);
     return;
