@@ -4,12 +4,14 @@ An approval_required job never runs the engine until a human approves the
 run; reject terminates it without running.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from test_api import create_job
 from test_tenancy import ADMIN, _mint_tenant
 from ticloud.config import settings
-from ticloud.models import TERMINAL_STATUSES, Run, RunStatus
+from ticloud.models import Alert, TERMINAL_STATUSES, Run, RunStatus
 from ticloud.scheduler.queue import claim_next_run
 from ticloud.scheduler.worker import execute_run
 
@@ -44,14 +46,58 @@ def test_gate_holds_run_then_approve_runs_it(session, client):
 
     assert any(x["id"] == run["id"] for x in client.get("/approvals").json())
     assert any(a["kind"] == "approval_required" for a in client.get("/alerts").json())
+    assert client.get("/alerts/summary").json() == {"unacknowledged": 1}
 
     approved = client.post(f"/runs/{run['id']}/approve").json()
     assert approved["status"] == "queued"
+    assert client.get("/alerts/summary").json() == {"unacknowledged": 0}
     claimed = claim_next_run(session)
     assert claimed is not None and claimed.id == run["id"]
     execute_run(claimed.id)
     session.expire_all()
     assert session.get(Run, run["id"]).status == RunStatus.SUCCEEDED
+
+
+def test_approval_gate_does_not_duplicate_alert_for_same_run(session, client):
+    job = create_job(client, cron=None, approval_required=True)
+    run = _trigger_and_execute(session, client, job["id"])
+
+    execute_run(run["id"])
+    session.expire_all()
+
+    alerts = (
+        session.query(Alert)
+        .filter_by(run_id=run["id"], kind="approval_required")
+        .all()
+    )
+    assert len(alerts) == 1
+    assert client.get("/alerts/summary").json() == {"unacknowledged": 1}
+
+
+def test_approvals_queue_keyset_pagination(session, client):
+    job = create_job(client, cron=None, approval_required=True)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for i in range(5):
+        session.add(
+            Run(
+                job_id=job["id"],
+                status=RunStatus.AWAITING_APPROVAL,
+                approval_state="pending",
+                scheduled_at=base + timedelta(minutes=i),
+            )
+        )
+    session.commit()
+
+    page1 = client.get("/approvals", params={"limit": 2}).json()
+    assert len(page1) == 2
+    last = page1[-1]
+    cursor = f"{last['scheduled_at']}|{last['id']}"
+
+    page2 = client.get("/approvals", params={"limit": 2, "cursor": cursor}).json()
+
+    assert len(page2) == 2
+    assert not ({r["id"] for r in page1} & {r["id"] for r in page2})
+    assert all(r["scheduled_at"] <= last["scheduled_at"] for r in page2)
 
 
 def test_reject_terminates_without_running(session, client):
@@ -60,6 +106,7 @@ def test_reject_terminates_without_running(session, client):
 
     rejected = client.post(f"/runs/{run['id']}/reject").json()
     assert rejected["status"] == "cancelled"
+    assert client.get("/alerts/summary").json() == {"unacknowledged": 0}
     rr = session.get(Run, run["id"])
     assert rr.approval_state == "rejected" and rr.error == "rejected by reviewer"
     assert claim_next_run(session) is None  # never runs
@@ -71,6 +118,7 @@ def test_cancel_awaiting_approval_terminates_without_running(session, client):
 
     cancelled = client.post(f"/runs/{run['id']}/cancel").json()
     assert cancelled["status"] == "cancelled"
+    assert client.get("/alerts/summary").json() == {"unacknowledged": 0}
     rr = session.get(Run, run["id"])
     assert rr.status == RunStatus.CANCELLED
     assert rr.error == "cancelled by user"

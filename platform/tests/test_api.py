@@ -372,6 +372,10 @@ def test_limit_validation_for_runs_stats_and_alerts(client):
         ("/alerts", 0, 422),
         ("/alerts", 501, 422),
         ("/alerts", 1, 200),
+        ("/approvals", -1, 422),
+        ("/approvals", 0, 422),
+        ("/approvals", 201, 422),
+        ("/approvals", 1, 200),
     ]
 
     for path, limit, expected_status in cases:
