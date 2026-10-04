@@ -466,14 +466,15 @@ async function jobsView() {
 async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
   const runFilter = parseRunFilter(rawRunFilter);
   const runCursor = rawCursor ? decodeURIComponent(rawCursor) : null;
+  const runsPath = runFilterApiPath(id, runFilter, runCursor);
   const [job, schedulePreview, runs, stats, lessons, modes, cases] = await Promise.all([
     api(`/jobs/${id}`),
     api(`/jobs/${id}/schedule-preview?count=5`).catch(() => ({ paused: false, upcoming: [] })),
-    api(runFilterApiPath(id, runFilter, runCursor)),
-    api(`/jobs/${id}/stats`),
-    api(`/jobs/${id}/lessons`),
-    api(`/failure-modes?job_id=${encodeURIComponent(id)}`),
-    api("/eval-cases"),
+    api(runsPath).catch(() => (runFilter === "all" && !runCursor ? api(`/jobs/${id}/runs`).catch(() => []) : [])),
+    api(`/jobs/${id}/stats`).catch(() => []),
+    api(`/jobs/${id}/lessons`).catch(() => []),
+    api(`/failure-modes?job_id=${encodeURIComponent(id)}`).catch(() => []),
+    api(`/eval-cases?job_id=${encodeURIComponent(id)}`).catch(() => []),
   ]);
   const jobCases = cases.filter((c) => c.job_id === id);
   const hasEnabledJobCases = jobCases.some((c) => c.enabled);
@@ -608,7 +609,8 @@ async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
       <button class="danger" data-deljob="${esc(job.id)}" data-name="${esc(job.name)}">Delete job</button>
     </div>`;
 
-  document.getElementById("jobsettings").addEventListener("submit", async (ev) => {
+  const jobSettingsEl = document.getElementById("jobsettings");
+  if (jobSettingsEl) jobSettingsEl.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
     const optionalText = (name) => {
@@ -643,7 +645,8 @@ async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
     } catch (e) { toast(e.message); }
   });
 
-  document.getElementById("lessonform").addEventListener("submit", async (ev) => {
+  const lessonFormEl = document.getElementById("lessonform");
+  if (lessonFormEl) lessonFormEl.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
     const body = {
@@ -671,7 +674,8 @@ async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
     } catch (e) { toast(e.message); }
   }));
 
-  document.getElementById("jobevalcase").addEventListener("submit", async (ev) => {
+  const jobEvalCaseEl = document.getElementById("jobevalcase");
+  if (jobEvalCaseEl) jobEvalCaseEl.addEventListener("submit", async (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
     let payload;

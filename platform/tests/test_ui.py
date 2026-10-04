@@ -39,7 +39,7 @@ def test_api_module_runs_dashboard_server(tmp_path):
         [
             sys.executable,
             "-m",
-            "ticloud.api.main",
+            "ticloud.api",
             "--host",
             "127.0.0.1",
             "--port",
@@ -354,6 +354,7 @@ def test_ui_exposes_job_scoped_eval_case_creation(client):
     app_js = client.get("/ui/app.js").text
 
     assert 'id="jobevalcase"' in app_js
+    assert "api(`/eval-cases?job_id=${encodeURIComponent(id)}`).catch(() => [])" in app_js
     assert 'placeholder="${formValue(job.name)}-regression"' in app_js
     assert "JSON.stringify(job.payload || {}, null, 2)" in app_js
     assert "job_id: id" in app_js
