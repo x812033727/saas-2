@@ -176,7 +176,7 @@ def test_qa_ui_job_detail_survives_schedule_preview_failure():
         if (path === "/jobs/job-1/stats") return response(200, []);
         if (path === "/jobs/job-1/lessons") return response(200, []);
         if (path === "/failure-modes?job_id=job-1") return response(200, []);
-        if (path === "/eval-cases") return response(200, []);
+        if (path === "/eval-cases?job_id=job-1") return response(200, []);
         return response(404, { detail: `unexpected ${path}` });
       },
     };

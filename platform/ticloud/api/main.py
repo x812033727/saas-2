@@ -924,10 +924,16 @@ def promote_failure_mode(
 
 @app.get("/eval-cases", response_model=list[EvalCaseOut])
 def list_eval_cases(
-    session: Session = Depends(db), tenant: Tenant | None = Depends(current_tenant)
+    job_id: str | None = None,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
 ) -> list[EvalCase]:
     stmt = select(EvalCase).order_by(EvalCase.created_at)
-    if tenant is not None:
+    job_id = _clean_optional_query_id(job_id)
+    if job_id is not None:
+        _get_job(session, job_id, tenant)
+        stmt = stmt.where(EvalCase.job_id == job_id)
+    elif tenant is not None:
         stmt = stmt.where(EvalCase.job_id.in_(_tenant_job_ids(session, tenant)))
     return session.scalars(stmt).all()
 

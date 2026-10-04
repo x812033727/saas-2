@@ -122,6 +122,23 @@ def test_qa_eval_case_trims_job_id_and_rejects_blank_job_id(client, session):
     )
 
 
+def test_qa_eval_case_list_can_filter_by_job_id_and_rejects_blank(client):
+    job_a = client.post("/jobs", json={"name": "qa-list-a"}).json()
+    job_b = client.post("/jobs", json={"name": "qa-list-b"}).json()
+    client.post("/eval-cases", json={"name": "global-case"})
+    client.post("/eval-cases", json={"name": "job-a-case", "job_id": job_a["id"]})
+    client.post("/eval-cases", json={"name": "job-b-case", "job_id": job_b["id"]})
+
+    filtered = client.get("/eval-cases", params={"job_id": f"  {job_a['id']}  "})
+    blank = client.get("/eval-cases", params={"job_id": " \t\n "})
+    missing = client.get("/eval-cases", params={"job_id": "missing"})
+
+    assert filtered.status_code == 200, filtered.text
+    assert [case["name"] for case in filtered.json()] == ["job-a-case"]
+    assert blank.status_code == 422, blank.text
+    assert missing.status_code == 404, missing.text
+
+
 def test_qa_eval_run_request_trims_job_id_and_rejects_blank_job_id(client):
     job = client.post("/jobs", json={"name": "eval-run-source"}).json()
     client.post(
