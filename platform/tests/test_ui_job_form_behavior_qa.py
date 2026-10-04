@@ -468,6 +468,150 @@ def test_qa_job_detail_survives_secondary_api_failures():
     assert "QA_JOB_DETAIL_SECONDARY_API_FALLBACK_OK" in result.stdout
 
 
+def test_qa_filtered_run_history_failure_does_not_leak_unfiltered_runs():
+    script = r"""
+    const assert = require("assert");
+    const fs = require("fs");
+    const vm = require("vm");
+
+    const calls = [];
+    const jobSettingsForm = { handlers: {}, addEventListener(type, handler) { this.handlers[type] = handler; } };
+    const lessonForm = { handlers: {}, addEventListener(type, handler) { this.handlers[type] = handler; } };
+    const jobEvalCaseForm = { handlers: {}, addEventListener(type, handler) { this.handlers[type] = handler; } };
+    const appEl = { innerHTML: "", addEventListener() {} };
+    const alertCount = {};
+
+    function response(status, body) {
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: String(status),
+        json: async () => body,
+      };
+    }
+
+    const nextRunAt = new Date(Date.now() + 900000).toISOString();
+    const job = {
+      id: "job-1",
+      name: "qa-filtered-history",
+      engine: "offline",
+      paused: false,
+      cron: null,
+      interval_seconds: 600,
+      payload: { repo_url: "https://example.test/repo" },
+      budget_usd: 5,
+      timeout_s: 1800,
+      max_retries: 2,
+      retry_backoff_s: 0,
+      score_threshold: 0.75,
+      on_low_score: "alert",
+      webhook_url: null,
+      approval_required: false,
+      next_run_at: nextRunAt,
+      created_at: nextRunAt,
+    };
+
+    const context = {
+      console,
+      Date,
+      JSON,
+      Math,
+      Number,
+      String,
+      Set,
+      Promise,
+      encodeURIComponent,
+      decodeURIComponent,
+      clearTimeout() {},
+      setTimeout() { return 1; },
+      localStorage: { getItem() { return null; }, setItem() {} },
+      prompt() { return ""; },
+      location: { hash: "#/jobs/job-1/failed" },
+      window: { addEventListener() {}, EventSource: undefined },
+      FormData: function() {},
+      document: {
+        hidden: false,
+        activeElement: null,
+        body: { append() {} },
+        addEventListener() {},
+        createElement() {
+          return {
+            className: "",
+            textContent: "",
+            classList: { add() {}, remove() {} },
+          };
+        },
+        querySelector() { return null; },
+        querySelectorAll(selector) {
+          return selector === ".lessonedit" ? [] : [];
+        },
+        getElementById(id) {
+          if (id === "app") return appEl;
+          if (id === "alert-count") return alertCount;
+          if (id === "jobsettings") return jobSettingsForm;
+          if (id === "lessonform") return lessonForm;
+          if (id === "jobevalcase") return jobEvalCaseForm;
+          return null;
+        },
+      },
+      fetch: async (path, opts = {}) => {
+        calls.push({ path, opts });
+        if (path === "/alerts/summary") return response(200, { unacknowledged: 0 });
+        if (path === "/jobs/job-1") return response(200, job);
+        if (path === "/jobs/job-1/schedule-preview?count=5") {
+          return response(200, { paused: false, upcoming: [nextRunAt] });
+        }
+        if (path === "/jobs/job-1/runs?limit=50&status=failed") {
+          return response(500, { detail: "filtered history exploded" });
+        }
+        if (path === "/jobs/job-1/runs") {
+          return response(200, [{
+            id: "all-run-should-not-leak",
+            status: "succeeded",
+            attempt: 1,
+            scheduled_at: nextRunAt,
+            started_at: nextRunAt,
+            finished_at: nextRunAt,
+            score: 1,
+            cost_usd: 0,
+            result: { summary: "wrong filter" },
+          }]);
+        }
+        if (path === "/jobs/job-1/stats") return response(200, []);
+        if (path === "/jobs/job-1/lessons") return response(200, []);
+        if (path === "/failure-modes?job_id=job-1") return response(200, []);
+        if (path === "/eval-cases?job_id=job-1") return response(200, []);
+        return response(404, { detail: `unexpected ${path}` });
+      },
+    };
+    context.globalThis = context;
+
+    (async () => {
+      const code = fs.readFileSync("ticloud/web/app.js", "utf8");
+      vm.runInNewContext(code, context, { filename: "app.js" });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      assert(appEl.innerHTML.includes("qa-filtered-history"));
+      assert(appEl.innerHTML.includes("No runs match this filter."));
+      assert(!appEl.innerHTML.includes("all-run-should-not-leak"));
+      assert(calls.some((call) => call.path === "/jobs/job-1/runs?limit=50&status=failed"));
+      assert(!calls.some((call) => call.path === "/jobs/job-1/runs"));
+      assert.strictEqual(typeof jobSettingsForm.handlers.submit, "function");
+      assert.strictEqual(typeof lessonForm.handlers.submit, "function");
+      assert.strictEqual(typeof jobEvalCaseForm.handlers.submit, "function");
+      console.log("QA_FILTERED_RUN_HISTORY_FAIL_CLOSED_OK");
+    })().catch((err) => {
+      console.error(err && err.stack ? err.stack : err);
+      process.exit(1);
+    });
+    """
+
+    result = _run_node(script)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "QA_FILTERED_RUN_HISTORY_FAIL_CLOSED_OK" in result.stdout
+
+
 def test_qa_job_detail_eval_case_form_posts_current_job_and_blocks_bad_json():
     script = r"""
     const assert = require("assert");
