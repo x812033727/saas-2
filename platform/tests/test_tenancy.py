@@ -11,7 +11,7 @@ from sqlalchemy import inspect, select, text
 from test_worker import run_job_once
 from ticloud.config import settings
 from ticloud.db import engine, init_db
-from ticloud.models import Alert, Job, Run, RunStatus
+from ticloud.models import Alert, EvalCase, Job, Run, RunStatus
 
 ADMIN = {"Authorization": "Bearer admin-secret"}
 
@@ -350,6 +350,85 @@ def test_tenants_have_independent_name_namespaces(client, hosted, session):
     ok_b = client.post("/failure-modes/promote", json={"signature": sig_b}, headers=auth_b)
     assert (ok_a.status_code, ok_b.status_code) == (201, 201)
     assert ok_a.json()["name"] != ok_b.json()["name"]
+
+
+def test_hosted_failure_promotion_name_collision_is_tenant_scoped(client, hosted, session):
+    tenant_a, _, auth_a = _mint_tenant(client, "team-a")
+    tenant_b, _, auth_b = _mint_tenant(client, "team-b")
+    job_a = Job(
+        id="deadbeef" + ("a" * 24),
+        name="source-a",
+        tenant_id=tenant_a["id"],
+        engine="offline",
+        payload={},
+    )
+    job_b = Job(
+        id="deadbeef" + ("b" * 24),
+        name="source-b",
+        tenant_id=tenant_b["id"],
+        engine="offline",
+        payload={},
+    )
+    session.add_all([job_a, job_b])
+    session.flush()
+    session.add_all(
+        [
+            Run(job_id=job_a.id, status=RunStatus.FAILED, error="RuntimeError: shared failure"),
+            Run(job_id=job_b.id, status=RunStatus.FAILED, error="RuntimeError: shared failure"),
+        ]
+    )
+    session.commit()
+
+    sig_a = client.get("/failure-modes", headers=auth_a).json()[0]["signature"]
+    sig_b = client.get("/failure-modes", headers=auth_b).json()[0]["signature"]
+    assert sig_a == sig_b
+
+    promoted_a = client.post("/failure-modes/promote", json={"signature": sig_a}, headers=auth_a)
+    promoted_b = client.post("/failure-modes/promote", json={"signature": sig_b}, headers=auth_b)
+
+    assert promoted_a.status_code == 201, promoted_a.text
+    assert promoted_b.status_code == 201, promoted_b.text
+    assert promoted_a.json()["name"] == promoted_b.json()["name"]
+    assert promoted_a.json()["job_id"] == job_a.id
+    assert promoted_b.json()["job_id"] == job_b.id
+
+
+def test_hosted_failure_modes_ignore_legacy_global_eval_cases(client, hosted, session):
+    _, _, auth_a = _mint_tenant(client, "team-a")
+    job = client.post(
+        "/jobs",
+        json={"name": "a-legacy-global", "payload": {"fail_at": 2}, "max_retries": 0},
+        headers=auth_a,
+    ).json()
+    client.post(f"/jobs/{job['id']}/trigger", headers=auth_a)
+
+    from ticloud.scheduler.queue import claim_next_run
+    from ticloud.scheduler.worker import execute_run
+
+    execute_run(claim_next_run(session).id)
+    mode = client.get("/failure-modes", headers=auth_a).json()[0]
+    session.add(
+        EvalCase(
+            name="legacy-global",
+            engine="offline",
+            payload={},
+            source_signature=mode["signature"],
+        )
+    )
+    session.commit()
+
+    modes = client.get("/failure-modes", headers=auth_a).json()
+    unpromoted = client.get("/failure-modes?unpromoted_only=true", headers=auth_a).json()
+    promoted = client.post(
+        "/failure-modes/promote",
+        json={"signature": mode["signature"]},
+        headers=auth_a,
+    )
+
+    assert modes[0]["promoted"] is False
+    assert [m["signature"] for m in unpromoted] == [mode["signature"]]
+    assert promoted.status_code == 201, promoted.text
+    assert promoted.json()["job_id"] == job["id"]
 
 
 def test_hosted_eval_case_requires_owned_job(client, hosted):
