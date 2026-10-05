@@ -178,7 +178,9 @@ def _tenant_job_ids(session: Session, tenant: Tenant) -> list[str]:
     return list(session.scalars(select(Job.id).where(Job.tenant_id == tenant.id)))
 
 
-def _promoted_failure_signatures(session: Session, modes) -> set[str]:
+def _promoted_failure_signatures(
+    session: Session, modes, tenant: Tenant | None = None
+) -> set[str]:
     jobs_by_signature = {m.signature: set(m.job_ids) for m in modes}
     signatures = set(jobs_by_signature)
     job_ids = {job_id for ids in jobs_by_signature.values() for job_id in ids}
@@ -188,8 +190,13 @@ def _promoted_failure_signatures(session: Session, modes) -> set[str]:
     stmt = select(EvalCase.source_signature, EvalCase.job_id).where(
         EvalCase.source_signature.in_(signatures)
     )
-    if job_ids:
-        stmt = stmt.where(or_(EvalCase.job_id.is_(None), EvalCase.job_id.in_(job_ids)))
+    if tenant is None:
+        if job_ids:
+            stmt = stmt.where(or_(EvalCase.job_id.is_(None), EvalCase.job_id.in_(job_ids)))
+    elif job_ids:
+        stmt = stmt.where(EvalCase.job_id.in_(job_ids))
+    else:
+        return set()
 
     global_cases = set()
     covered_jobs: dict[str, set[str]] = {}
@@ -207,11 +214,19 @@ def _promoted_failure_signatures(session: Session, modes) -> set[str]:
 
 
 def _failure_mode_case_coverage(
-    session: Session, signature: str, job_ids: set[str]
+    session: Session,
+    signature: str,
+    job_ids: set[str],
+    tenant: Tenant | None = None,
 ) -> tuple[bool, set[str]]:
     stmt = select(EvalCase.job_id).where(EvalCase.source_signature == signature)
-    if job_ids:
-        stmt = stmt.where(or_(EvalCase.job_id.is_(None), EvalCase.job_id.in_(job_ids)))
+    if tenant is None:
+        if job_ids:
+            stmt = stmt.where(or_(EvalCase.job_id.is_(None), EvalCase.job_id.in_(job_ids)))
+    elif job_ids:
+        stmt = stmt.where(EvalCase.job_id.in_(job_ids))
+    else:
+        return False, set()
 
     has_global_case = False
     covered_job_ids: set[str] = set()
@@ -223,9 +238,11 @@ def _failure_mode_case_coverage(
     return has_global_case, covered_job_ids
 
 
-def _next_uncovered_failure_mode(session: Session, mode, scope_ids: list[str] | None):
+def _next_uncovered_failure_mode(
+    session: Session, mode, scope_ids: list[str] | None, tenant: Tenant | None = None
+):
     has_global_case, covered_job_ids = _failure_mode_case_coverage(
-        session, mode.signature, set(mode.job_ids)
+        session, mode.signature, set(mode.job_ids), tenant
     )
     if has_global_case:
         raise HTTPException(409, "eval case for failure mode already exists")
@@ -864,7 +881,7 @@ def failure_modes(
         limit_runs=limit_runs,
         min_count=min_count,
     )
-    promoted = _promoted_failure_signatures(session, modes)
+    promoted = _promoted_failure_signatures(session, modes, tenant)
     if unpromoted_only:
         modes = [m for m in modes if m.signature not in promoted]
     return [
@@ -899,14 +916,14 @@ def promote_failure_mode(
     if mode is None:
         raise HTTPException(404, "failure mode not found")
     if body.job_id is None:
-        mode = _next_uncovered_failure_mode(session, mode, scope_ids)
+        mode = _next_uncovered_failure_mode(session, mode, scope_ids, tenant)
 
     latest = session.get(Run, mode.latest_run_id)
     job = latest.job
     # Namespace by job so the same normalized signature (timeouts, connection
     # errors, ...) hit by different jobs/tenants never collides on name.
     name = f"regression-{job.id[:8]}-{mode.signature}"
-    if session.scalar(select(EvalCase).where(EvalCase.name == name)):
+    if _eval_case_name_exists(session, name, tenant):
         raise HTTPException(409, f"eval case {name!r} already exists")
 
     case = EvalCase(

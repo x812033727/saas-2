@@ -13,10 +13,11 @@ const esc = (s) =>
 
 async function api(path, opts = {}) {
   // Hosted mode: attach the tenant API key; on 401 ask for one and retry.
-  const headers = { "content-type": "application/json" };
+  const { headers: customHeaders = {}, ...fetchOpts } = opts;
+  const headers = { "content-type": "application/json", ...customHeaders };
   const key = localStorage.getItem("ticloud_api_key");
   if (key) headers["authorization"] = `Bearer ${key}`;
-  const resp = await fetch(path, { headers, ...opts });
+  const resp = await fetch(path, { ...fetchOpts, headers });
   if (resp.status === 401) {
     const entered = prompt("Ti Cloud API key (tck_…):", key || "");
     if (entered && entered !== key) {
