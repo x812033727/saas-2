@@ -453,6 +453,18 @@ def test_jobs_view_uses_overview_attention_counts(client):
     assert ".attention-pill.stale" in style_css
 
 
+def test_jobs_view_exposes_workspace_run_summary(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert 'api("/runs/summary").catch(() => null)' in app_js
+    assert "function runSummaryTiles(summary)" in app_js
+    assert 'class="tiles run-summary"' in app_js
+    assert 'count("queued") + count("awaiting_approval") + count("running")' in app_js
+    assert 'Number(summary.stale_running || 0)' in app_js
+    assert ".run-summary" in style_css
+
+
 def test_job_detail_flags_and_cancels_stale_running_runs(client):
     app_js = client.get("/ui/app.js").text
     style_css = client.get("/ui/style.css").text

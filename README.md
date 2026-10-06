@@ -271,7 +271,10 @@ Prometheus exposition (queue depth, oldest queued/running run age, runs by
 status, jobs, unacknowledged alerts, cumulative spend/tokens) — point a
 scraper at it.
 Job run history supports `?status=running` and `?stale=true` so automation can
-find stuck in-flight runs without scraping the dashboard.
+find stuck in-flight runs without scraping the dashboard. Use `GET /runs` for
+the same filters across all visible jobs, optionally narrowed with `job_id`;
+`GET /runs/summary` returns workspace run counts by status plus stale-running
+counts, and the dashboard surfaces those totals on the Jobs view.
 Set `TICLOUD_LOG_JSON=1` for one-JSON-object-per-line logs (with run/job
 ids) instead of plain text.
 
