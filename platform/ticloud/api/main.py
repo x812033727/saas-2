@@ -68,6 +68,7 @@ from .schemas import (
     PromoteRequest,
     RunDetailOut,
     RunOut,
+    RunSummary,
     SchedulePreviewOut,
     RunStatPoint,
     TemplateInstantiate,
@@ -1045,6 +1046,85 @@ def delete_eval_case(
     case = _get_eval_case(session, case_id, tenant)
     session.delete(case)
     session.commit()
+
+
+@app.get("/runs", response_model=list[RunOut])
+def list_all_runs(
+    job_id: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    cursor: str | None = None,
+    status: RunStatus | None = None,
+    stale: bool = False,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> list[Run]:
+    """Newest runs across the visible workspace.
+
+    This is the operator-friendly counterpart to the job-scoped run history:
+    automation can ask for all queued/running/stale runs without first
+    crawling every job.
+    """
+    job_id = _clean_optional_query_id(job_id)
+    scope_job_ids: list[str] | None = None
+    stmt = select(Run)
+    if job_id is not None:
+        _get_job(session, job_id, tenant)
+        scope_job_ids = [job_id]
+        stmt = stmt.where(Run.job_id == job_id)
+    elif tenant is not None:
+        scope_job_ids = _tenant_job_ids(session, tenant)
+        if not scope_job_ids:
+            return []
+        stmt = stmt.where(Run.job_id.in_(scope_job_ids))
+
+    if status is not None:
+        stmt = stmt.where(Run.status == status)
+    if stale:
+        run_ids = stale_running_run_ids(session, scope_job_ids)
+        if not run_ids:
+            return []
+        stmt = stmt.where(Run.id.in_(run_ids))
+    keyset = _keyset_before(Run.scheduled_at, Run.id, cursor)
+    if keyset is not None:
+        stmt = stmt.where(keyset)
+    return session.scalars(
+        stmt.order_by(Run.scheduled_at.desc(), Run.id.desc()).limit(limit)
+    ).all()
+
+
+@app.get("/runs/summary", response_model=RunSummary)
+def runs_summary(
+    job_id: str | None = None,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> RunSummary:
+    """Counts for the visible run backlog without fetching full run rows."""
+    job_id = _clean_optional_query_id(job_id)
+    scope_job_ids: list[str] | None = None
+    stmt = select(Run.status, func.count(Run.id)).group_by(Run.status)
+    if job_id is not None:
+        _get_job(session, job_id, tenant)
+        scope_job_ids = [job_id]
+        stmt = stmt.where(Run.job_id == job_id)
+    elif tenant is not None:
+        scope_job_ids = _tenant_job_ids(session, tenant)
+        if not scope_job_ids:
+            return RunSummary(
+                total=0,
+                by_status={status.value: 0 for status in RunStatus},
+                stale_running=0,
+            )
+        stmt = stmt.where(Run.job_id.in_(scope_job_ids))
+
+    by_status = {status.value: 0 for status in RunStatus}
+    for status, count in session.execute(stmt):
+        key = status.value if isinstance(status, RunStatus) else str(status)
+        by_status[key] = count
+    return RunSummary(
+        total=sum(by_status.values()),
+        by_status=by_status,
+        stale_running=len(stale_running_run_ids(session, scope_job_ids)),
+    )
 
 
 def _get_run(session: Session, run_id: str, tenant: Tenant | None) -> Run:

@@ -269,6 +269,12 @@ class RunDetailOut(RunOut):
     scores: list[ScoreRecordOut]
 
 
+class RunSummary(BaseModel):
+    total: int
+    by_status: dict[str, int]
+    stale_running: int
+
+
 class RunStatPoint(BaseModel):
     """Lightweight per-run point for trend sparklines (drift view)."""
 

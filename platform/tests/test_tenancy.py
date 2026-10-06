@@ -134,6 +134,15 @@ def test_tenant_isolation_matrix(client, hosted):
     assert client.get(f"/jobs/{job['id']}", headers=auth_b).status_code == 404
     assert client.get(f"/jobs/{job['id']}/schedule-preview", headers=auth_b).status_code == 404
     assert client.get(f"/jobs/{job['id']}/runs", headers=auth_b).status_code == 404
+    assert [r["id"] for r in client.get("/runs", headers=auth_a).json()] == [run["id"]]
+    assert client.get("/runs", headers=auth_b).json() == []
+    assert client.get("/runs", params={"job_id": job["id"]}, headers=auth_b).status_code == 404
+    assert client.get("/runs/summary", headers=auth_a).json()["total"] == 1
+    assert client.get("/runs/summary", headers=auth_b).json()["total"] == 0
+    assert (
+        client.get("/runs/summary", params={"job_id": job["id"]}, headers=auth_b).status_code
+        == 404
+    )
     assert client.get(f"/runs/{run['id']}", headers=auth_b).status_code == 404
     assert client.post(f"/jobs/{job['id']}/trigger", headers=auth_b).status_code == 404
     assert client.delete(f"/jobs/{job['id']}", headers=auth_b).status_code == 404

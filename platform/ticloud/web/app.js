@@ -91,6 +91,21 @@ const RUN_HISTORY_FILTERS = [
   ["cancelled", "Cancelled"],
 ];
 
+function runSummaryTiles(summary) {
+  if (!summary) return "";
+  const byStatus = summary.by_status || {};
+  const count = (key) => Number(byStatus[key] || 0);
+  const active = count("queued") + count("awaiting_approval") + count("running");
+  const blocked = count("failed") + count("timed_out") + count("budget_exceeded");
+  return `
+    <div class="tiles run-summary">
+      <div class="tile"><div class="k">Total runs</div><div class="v">${Number(summary.total || 0)}</div></div>
+      <div class="tile"><div class="k">Active now</div><div class="v">${active}</div></div>
+      <div class="tile"><div class="k">Blocked</div><div class="v">${blocked}</div></div>
+      <div class="tile"><div class="k">Stale running</div><div class="v">${Number(summary.stale_running || 0)}</div></div>
+    </div>`;
+}
+
 function parseRunFilter(raw = "all") {
   const id = String(raw || "all");
   return RUN_HISTORY_FILTERS.some(([key]) => key === id) ? id : "all";
@@ -359,9 +374,10 @@ function jobSettingsForm(job) {
 }
 
 async function jobsView() {
-  const [jobs, templates] = await Promise.all([
+  const [jobs, templates, runSummary] = await Promise.all([
     api("/overview"),
     api("/templates").catch(() => []),
+    api("/runs/summary").catch(() => null),
   ]);
   const rows = jobs.map((j) => `
     <tr class="rowlink" data-href="#/jobs/${j.id}">
@@ -386,6 +402,7 @@ async function jobsView() {
   app.innerHTML = `
     <h1>Jobs</h1>
     <div class="sub">scheduled agent workshops, guarded by budget & timeout</div>
+    ${runSummaryTiles(runSummary)}
     <div class="card">
       ${jobs.length ? `<table>
         <thead><tr><th>Job</th><th>Schedule</th><th>Last run</th><th>Needs action</th><th class="num">Score</th><th>Trend</th><th class="num">Last cost</th><th></th></tr></thead>

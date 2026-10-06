@@ -357,9 +357,104 @@ def test_stale_filter_only_returns_overdue_running_runs(client, session):
     )
 
 
+def test_global_runs_can_filter_status_stale_and_job(client, session):
+    from datetime import datetime, timedelta, timezone
+
+    from ticloud.models import Run, RunStatus
+
+    job = create_job(client, name="global-runs-a", cron=None, timeout_s=1)
+    other = create_job(client, name="global-runs-b", cron=None, timeout_s=1)
+    now = datetime.now(timezone.utc)
+    failed = Run(
+        job_id=job["id"],
+        status=RunStatus.FAILED,
+        scheduled_at=now - timedelta(seconds=30),
+        finished_at=now - timedelta(seconds=29),
+        error="boom",
+    )
+    stale_running = Run(
+        job_id=job["id"],
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=20),
+        started_at=now - timedelta(seconds=20),
+    )
+    other_queued = Run(
+        job_id=other["id"],
+        status=RunStatus.QUEUED,
+        scheduled_at=now - timedelta(seconds=5),
+    )
+    session.add_all([failed, stale_running, other_queued])
+    session.commit()
+
+    assert [r["id"] for r in client.get("/runs?status=queued").json()] == [
+        other_queued.id
+    ]
+    assert [r["id"] for r in client.get("/runs?stale=true").json()] == [
+        stale_running.id
+    ]
+    assert [r["id"] for r in client.get("/runs", params={"job_id": job["id"]}).json()] == [
+        stale_running.id,
+        failed.id,
+    ]
+    assert client.get("/runs", params={"job_id": " \n\t "}).status_code == 422
+    assert client.get("/runs", params={"job_id": "missing"}).status_code == 404
+
+
+def test_global_runs_summary_counts_statuses_and_stale_runs(client, session):
+    from datetime import datetime, timedelta, timezone
+
+    from ticloud.models import Run, RunStatus
+
+    job = create_job(client, name="summary-runs-a", cron=None, timeout_s=1)
+    other = create_job(client, name="summary-runs-b", cron=None, timeout_s=1)
+    now = datetime.now(timezone.utc)
+    stale_running = Run(
+        job_id=job["id"],
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=20),
+        started_at=now - timedelta(seconds=20),
+    )
+    fresh_running = Run(
+        job_id=job["id"],
+        status=RunStatus.RUNNING,
+        scheduled_at=now,
+        started_at=now,
+    )
+    failed = Run(
+        job_id=job["id"],
+        status=RunStatus.FAILED,
+        scheduled_at=now - timedelta(seconds=10),
+        finished_at=now - timedelta(seconds=9),
+        error="boom",
+    )
+    other_queued = Run(job_id=other["id"], status=RunStatus.QUEUED, scheduled_at=now)
+    session.add_all([stale_running, fresh_running, failed, other_queued])
+    session.commit()
+
+    summary = client.get("/runs/summary").json()
+    assert summary["total"] == 4
+    assert summary["by_status"]["running"] == 2
+    assert summary["by_status"]["failed"] == 1
+    assert summary["by_status"]["queued"] == 1
+    assert summary["by_status"]["succeeded"] == 0
+    assert summary["stale_running"] == 1
+
+    job_summary = client.get("/runs/summary", params={"job_id": job["id"]}).json()
+    assert job_summary["total"] == 3
+    assert job_summary["by_status"]["queued"] == 0
+    assert job_summary["stale_running"] == 1
+
+    assert client.get("/runs/summary", params={"job_id": " \n\t "}).status_code == 422
+    assert client.get("/runs/summary", params={"job_id": "missing"}).status_code == 404
+
+
 def test_limit_validation_for_runs_stats_and_alerts(client):
     job = create_job(client)
     cases = [
+        ("/runs", -1, 422),
+        ("/runs", 0, 422),
+        ("/runs", 201, 422),
+        ("/runs", 1, 200),
         (f"/jobs/{job['id']}/runs", -1, 422),
         (f"/jobs/{job['id']}/runs", 0, 422),
         (f"/jobs/{job['id']}/runs", 201, 422),
