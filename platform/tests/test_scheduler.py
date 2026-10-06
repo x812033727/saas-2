@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from ticloud.models import Job, Run, RunStatus
 from ticloud.scheduler.cron import compute_next_run, compute_next_runs
-from ticloud.scheduler.queue import claim_next_run, enqueue_due_jobs, enqueue_manual
+from ticloud.scheduler.queue import ActiveRunError, claim_next_run, enqueue_due_jobs, enqueue_manual
 
 
 def make_job(session, **kw):
@@ -128,6 +130,32 @@ def test_claim_marks_running_and_drains(session):
     assert run is not None and run.status == RunStatus.RUNNING
     assert run.started_at is not None
     assert claim_next_run(session) is None  # queue drained
+
+
+@pytest.mark.parametrize(
+    "status",
+    [RunStatus.QUEUED, RunStatus.AWAITING_APPROVAL, RunStatus.RUNNING],
+)
+def test_manual_enqueue_can_reject_active_run(session, status):
+    job = make_job(session)
+    session.add(Run(job_id=job.id, status=status))
+    session.commit()
+
+    with pytest.raises(ActiveRunError):
+        enqueue_manual(session, job, allow_active=False)
+
+    assert session.query(Run).filter_by(job_id=job.id).count() == 1
+
+
+def test_manual_enqueue_allows_after_terminal_run(session):
+    job = make_job(session)
+    session.add(Run(job_id=job.id, status=RunStatus.FAILED))
+    session.commit()
+
+    run = enqueue_manual(session, job)
+
+    assert run.status == RunStatus.QUEUED
+    assert session.query(Run).filter_by(job_id=job.id).count() == 2
 
 
 def test_claim_oldest_first(session):

@@ -131,6 +131,24 @@ def test_rerun_terminal_run_keeps_history_and_failure_context(client):
     assert {r["id"] for r in runs} == {first["id"], body["id"]}
 
 
+def test_rerun_rejects_overlapping_active_run(client):
+    job = create_job(client, cron=None, payload={"fail_at": 0}, max_retries=0)
+    source = client.post(f"/jobs/{job['id']}/trigger").json()
+    execute_run(source["id"])
+    assert client.get(f"/runs/{source['id']}").json()["status"] == "failed"
+
+    assert client.patch(f"/jobs/{job['id']}", json={"payload": {}}).status_code == 200
+    active = client.post(f"/jobs/{job['id']}/trigger")
+    assert active.status_code == 201, active.text
+
+    blocked = client.post(f"/runs/{source['id']}/rerun")
+    assert blocked.status_code == 409
+    assert "active run" in blocked.json()["detail"]
+
+    execute_run(active.json()["id"])
+    assert client.post(f"/runs/{source['id']}/rerun").status_code == 201
+
+
 def test_rerun_non_terminal_run_409(client):
     job = create_job(client, cron=None)
     run = client.post(f"/jobs/{job['id']}/trigger").json()

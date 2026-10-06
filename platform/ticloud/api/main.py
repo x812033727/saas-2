@@ -43,7 +43,7 @@ from ..models import (
     utcnow,
 )
 from ..scheduler.cron import compute_next_run, compute_next_runs
-from ..scheduler.queue import enqueue_manual, enqueue_rerun
+from ..scheduler.queue import ActiveRunError, enqueue_manual, enqueue_rerun
 from .auth import generate_key, hash_key, make_current_tenant, require_admin
 from .schemas import (
     AlertAckSummary,
@@ -572,7 +572,10 @@ def trigger_job(
         raise HTTPException(
             402, f"tenant monthly budget (${tenant.monthly_budget_usd:.2f}) reached"
         )
-    return enqueue_manual(session, job)
+    try:
+        return enqueue_manual(session, job, allow_active=False)
+    except ActiveRunError as exc:
+        raise HTTPException(409, "job already has an active run") from exc
 
 
 @app.post("/jobs/{job_id}/pause", response_model=JobOut)
@@ -1173,7 +1176,10 @@ def rerun_run(
         raise HTTPException(
             402, f"tenant monthly budget (${tenant.monthly_budget_usd:.2f}) reached"
         )
-    return enqueue_rerun(session, run)
+    try:
+        return enqueue_rerun(session, run, allow_active=False)
+    except ActiveRunError as exc:
+        raise HTTPException(409, "job already has an active run") from exc
 
 
 @app.get("/approvals", response_model=list[RunOut])
