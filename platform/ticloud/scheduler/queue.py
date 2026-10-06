@@ -28,6 +28,10 @@ _ACTIVE_RUN_STATUSES = (
 )
 
 
+class ActiveRunError(RuntimeError):
+    """Raised when a job already has queued, held, or running work."""
+
+
 def running_count(session: Session, tenant_id: str | None = None) -> int:
     """Count RUNNING runs, optionally scoped to one tenant's jobs."""
     stmt = select(func.count(Run.id)).where(Run.status == RunStatus.RUNNING)
@@ -64,7 +68,7 @@ def _raise_quota_alert_once(session: Session, job: Job) -> None:
         )
 
 
-def _has_active_run(session: Session, job: Job) -> bool:
+def has_active_run(session: Session, job: Job) -> bool:
     return (
         session.scalar(
             select(Run.id)
@@ -95,7 +99,7 @@ def enqueue_due_jobs(session: Session, now: datetime | None = None) -> list[Run]
     created: list[Run] = []
     for job in due:
         job.next_run_at = compute_next_run(job, after=now)
-        if _has_active_run(session, job):
+        if has_active_run(session, job):
             log.info("skipped overlapping scheduled run for job %s", job.name)
             continue
         if _quota_blocked(session, job, now):
@@ -110,16 +114,20 @@ def enqueue_due_jobs(session: Session, now: datetime | None = None) -> list[Run]
     return created
 
 
-def enqueue_manual(session: Session, job: Job) -> Run:
+def enqueue_manual(session: Session, job: Job, *, allow_active: bool = True) -> Run:
     """Manually trigger a job outside its schedule."""
+    if not allow_active and has_active_run(session, job):
+        raise ActiveRunError("job already has an active run")
     run = Run(job_id=job.id, status=RunStatus.QUEUED)
     session.add(run)
     session.commit()
     return run
 
 
-def enqueue_rerun(session: Session, source: Run) -> Run:
+def enqueue_rerun(session: Session, source: Run, *, allow_active: bool = True) -> Run:
     """Queue a fresh run from a completed run, preserving failure context."""
+    if not allow_active and has_active_run(session, source.job):
+        raise ActiveRunError("job already has an active run")
     result = {"rerun_of": source.id}
     if source.error:
         result["previous_error"] = source.error[:2000]

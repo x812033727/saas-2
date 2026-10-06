@@ -280,6 +280,30 @@ def test_trigger_execute_and_inspect_trace(client):
     assert len(runs) == 1 and runs[0]["id"] == run["id"]
 
 
+def test_trigger_rejects_overlapping_active_run(client):
+    job = create_job(client, cron=None)
+    first = client.post(f"/jobs/{job['id']}/trigger")
+    assert first.status_code == 201, first.text
+
+    blocked = client.post(f"/jobs/{job['id']}/trigger")
+    assert blocked.status_code == 409
+    assert "active run" in blocked.json()["detail"]
+
+    execute_run(first.json()["id"])
+    assert client.post(f"/jobs/{job['id']}/trigger").status_code == 201
+
+
+def test_trigger_treats_approval_wait_as_active(client):
+    job = create_job(client, cron=None, approval_required=True)
+    first = client.post(f"/jobs/{job['id']}/trigger")
+    assert first.status_code == 201, first.text
+    execute_run(first.json()["id"])
+
+    blocked = client.post(f"/jobs/{job['id']}/trigger")
+    assert blocked.status_code == 409
+    assert "active run" in blocked.json()["detail"]
+
+
 def test_list_runs_can_filter_status_and_stale(client, session):
     from datetime import datetime, timedelta, timezone
 
