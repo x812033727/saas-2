@@ -48,6 +48,22 @@ def test_qa_failure_route_helpers_preserve_filters_and_reject_bad_windows():
           route("unpromoted", "last-1"),
           {{ filter: "unpromoted", limitRuns: 500 }},
         );
+        assert.strictEqual(
+          context.failureRoute("category-rate_limit", 100),
+          "#/failures/category-rate_limit/last-100",
+        );
+        assert.strictEqual(
+          vm.runInContext('failureCategoryFilter("rate_limit")', context),
+          "category-rate_limit",
+        );
+        assert.deepStrictEqual(
+          route("category-rate_limit", "last-100"),
+          {{ filter: "category-rate_limit", limitRuns: 100, category: "rate_limit" }},
+        );
+        assert.deepStrictEqual(
+          route("category-database", "last-1000"),
+          {{ filter: "all", limitRuns: 500 }},
+        );
         assert.deepStrictEqual(
           route("unexpected", "last-1000"),
           {{ filter: "all", limitRuns: 500 }},

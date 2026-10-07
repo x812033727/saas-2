@@ -64,9 +64,12 @@ schedule → run → score every run → gate (alert / auto-pause)
     (no embedding API needed); `GET /failure-modes?min_count=2` focuses the
     list on recurring failures (most frequent, then most recent first),
     `limit_runs=1000` widens the scan window,
-    `unpromoted_only=true` shows what still needs an eval case, and one click
-    promotes a recurring mode into a regression **eval case**. The Failures
-    dashboard exposes the same filters plus Last 100/500/1000/5000 windows.
+    `unpromoted_only=true` shows what still needs an eval case, and each mode
+    includes a triage category plus deterministic `semantic_key` family for
+    spotting related errors before embedding-based clustering is enabled. One
+    click promotes a recurring mode into a regression **eval case**. The
+    Failures dashboard exposes the same filters plus category tabs and Last
+    100/500/1000/5000 windows.
   - **Eval CLI / CI gate**: `python -m ticloud.eval.cli run` replays the
     eval-set through the real engine + scorers and exits non-zero on any
     case below its `min_score` — wire it into CI
@@ -262,7 +265,7 @@ Run the API and dashboard:
 
 ```bash
 # From the repository root; seeds the demo and serves http://localhost:8010/ui/.
-TICLOUD_DATABASE_URL=sqlite:///./platform/dev.db .venv/bin/python -m ticloud.api --host 127.0.0.1 --port 8010 --seed-demo
+cd platform && TICLOUD_DATABASE_URL=sqlite:///./dev.db .venv/bin/python -m ticloud.api --host 127.0.0.1 --port 8010 --seed-demo
 ```
 
 `GET /health` and `GET /ready` both verify the API can reach its database;

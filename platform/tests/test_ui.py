@@ -303,6 +303,31 @@ def test_ui_exposes_failure_mode_filters(client):
     assert "m.promoted" in app_js
 
 
+def test_ui_exposes_failure_mode_category_filters(client):
+    app_js = client.get("/ui/app.js").text
+
+    assert "const FAILURE_CATEGORIES = [" in app_js
+    assert '["rate_limit", "Rate limit"]' in app_js
+    assert "const failureCategoryFilter = (category) => `category-${category}`" in app_js
+    assert 'params.set("category", category)' in app_js
+    assert 'aria-label="Failure category filters"' in app_js
+    assert "failureRoute(failureCategoryFilter(key), limitRuns)" in app_js
+
+
+def test_ui_exposes_failure_mode_triage_hints(client):
+    app_js = client.get("/ui/app.js").text
+    style_css = client.get("/ui/style.css").text
+
+    assert "const failureTriage = (m)" in app_js
+    assert 'class="failure-triage"' in app_js
+    assert "m.category" in app_js
+    assert "m.triage_hint" in app_js
+    assert "const failureFamily = (m)" in app_js
+    assert "m.semantic_key" in app_js
+    assert "family ${esc(m.semantic_key)}" in app_js
+    assert ".failure-triage" in style_css
+
+
 def test_ui_exposes_failure_mode_scan_window(client):
     app_js = client.get("/ui/app.js").text
 

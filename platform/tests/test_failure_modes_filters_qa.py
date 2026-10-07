@@ -1,6 +1,7 @@
 import pytest
 
 from ticloud.config import settings
+from ticloud.models import Run, RunStatus
 from ticloud.scheduler.worker import execute_run
 
 
@@ -68,6 +69,8 @@ def test_qa_failure_modes_combines_min_count_and_unpromoted_filters(client):
     assert recurring.json()[0]["summary"].startswith(
         "RuntimeError: simulated failure at step <n>"
     )
+    assert recurring.json()[0]["category"] == "runtime"
+    assert "latest run trace" in recurring.json()[0]["triage_hint"]
     assert recurring.json()[0]["count"] == 2
     assert recurring.json()[0]["promoted"] is False
 
@@ -115,6 +118,129 @@ def test_qa_failure_modes_limit_runs_bounds_scan_window(client):
 
     invalid = client.get("/failure-modes?limit_runs=0")
     assert invalid.status_code == 422
+
+
+def test_qa_failure_modes_filters_by_category(client, session):
+    runtime_job = _create_job(
+        client,
+        name="qa-category-runtime",
+        payload={"fail_at": 1},
+    )
+    rate_job = _create_job(
+        client,
+        name="qa-category-rate",
+        payload={},
+    )
+    session.add_all(
+        [
+            Run(
+                job_id=runtime_job["id"],
+                status=RunStatus.FAILED,
+                error="RuntimeError: simulated failure at step 1",
+            ),
+            Run(
+                job_id=rate_job["id"],
+                status=RunStatus.FAILED,
+                error="HTTPError: 429 too many requests",
+            ),
+        ]
+    )
+    session.commit()
+
+    runtime = client.get("/failure-modes?category=runtime")
+    assert runtime.status_code == 200, runtime.text
+    assert [m["job_ids"] for m in runtime.json()] == [[runtime_job["id"]]]
+
+    rate_limit = client.get("/failure-modes", params={"category": " RATE_LIMIT "})
+    assert rate_limit.status_code == 200, rate_limit.text
+    assert rate_limit.json()[0]["category"] == "rate_limit"
+    assert rate_limit.json()[0]["semantic_key"] == "rate_limit"
+    assert rate_limit.json()[0]["job_ids"] == [rate_job["id"]]
+
+    blank = client.get("/failure-modes", params={"category": " \t "})
+    assert blank.status_code == 422
+
+    unknown = client.get("/failure-modes?category=database")
+    assert unknown.status_code == 422
+
+
+def test_qa_failure_modes_category_filter_composes_with_scope_and_promotion(client, session):
+    timeout_job = _create_job(
+        client,
+        name="qa-category-timeout-scope",
+        payload={},
+    )
+    rate_job = _create_job(
+        client,
+        name="qa-category-rate-scope",
+        payload={},
+    )
+    session.add_all(
+        [
+            Run(
+                job_id=timeout_job["id"],
+                status=RunStatus.FAILED,
+                error="TimeoutError: deadline exceeded after 30s",
+            ),
+            Run(
+                job_id=timeout_job["id"],
+                status=RunStatus.FAILED,
+                error="TimeoutError: deadline exceeded after 31s",
+            ),
+            Run(
+                job_id=rate_job["id"],
+                status=RunStatus.FAILED,
+                error="HTTPError: 429 too many requests",
+            ),
+        ]
+    )
+    session.commit()
+
+    scoped_timeout = client.get(
+        "/failure-modes",
+        params={
+            "job_id": timeout_job["id"],
+            "category": "timeout",
+            "min_count": 2,
+            "unpromoted_only": True,
+        },
+    )
+    assert scoped_timeout.status_code == 200, scoped_timeout.text
+    assert len(scoped_timeout.json()) == 1
+    assert scoped_timeout.json()[0]["category"] == "timeout"
+    assert scoped_timeout.json()[0]["count"] == 2
+    assert scoped_timeout.json()[0]["job_ids"] == [timeout_job["id"]]
+
+    wrong_category_in_scope = client.get(
+        "/failure-modes",
+        params={"job_id": timeout_job["id"], "category": "rate_limit"},
+    )
+    assert wrong_category_in_scope.status_code == 200, wrong_category_in_scope.text
+    assert wrong_category_in_scope.json() == []
+
+    promoted = client.post(
+        "/failure-modes/promote",
+        json={"signature": scoped_timeout.json()[0]["signature"], "job_id": timeout_job["id"]},
+    )
+    assert promoted.status_code == 201, promoted.text
+
+    promoted_timeout = client.get(
+        "/failure-modes",
+        params={
+            "job_id": timeout_job["id"],
+            "category": "timeout",
+            "unpromoted_only": True,
+        },
+    )
+    assert promoted_timeout.status_code == 200, promoted_timeout.text
+    assert promoted_timeout.json() == []
+
+    unpromoted_rate = client.get(
+        "/failure-modes",
+        params={"category": "rate_limit", "unpromoted_only": True},
+    )
+    assert unpromoted_rate.status_code == 200, unpromoted_rate.text
+    assert unpromoted_rate.json()[0]["job_ids"] == [rate_job["id"]]
 
 
 def test_qa_promote_trims_signature_and_rejects_blank_signature(client):

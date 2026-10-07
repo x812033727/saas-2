@@ -196,6 +196,16 @@ td .attention-pill.stale { margin-top: 4px; }
 .badge.queued .dot, .badge.awaiting_approval .dot { background: var(--warning); }
 .badge.running .dot { background: var(--series-1); animation: pulse 1.2s ease-in-out infinite; }
 .badge.cancelled .dot, .badge.paused .dot { background: var(--muted); }
+.failure-triage { display: inline-block; margin-top: 4px; color: var(--muted); line-height: 1.35; }
+.failure-triage span {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-weight: 600;
+}
 @keyframes pulse { 50% { opacity: 0.35; } }
 
 button {

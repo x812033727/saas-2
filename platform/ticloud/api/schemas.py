@@ -342,6 +342,9 @@ class LessonUpdate(WriteModel):
 class FailureModeOut(BaseModel):
     signature: str
     summary: str
+    category: str
+    triage_hint: str
+    semantic_key: str
     count: int
     promoted: bool = False
     job_ids: list[str]
