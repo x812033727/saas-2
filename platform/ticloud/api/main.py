@@ -44,6 +44,7 @@ from ..models import (
 )
 from ..scheduler.cron import compute_next_run, compute_next_runs
 from ..scheduler.queue import ActiveRunError, enqueue_manual, enqueue_rerun
+from ..scheduler.worker import reap_stale_running_runs
 from .auth import generate_key, hash_key, make_current_tenant, require_admin
 from .schemas import (
     AlertAckSummary,
@@ -1128,6 +1129,29 @@ def runs_summary(
         by_status=by_status,
         stale_running=len(stale_running_run_ids(session, scope_job_ids)),
     )
+
+
+@app.post("/runs/reap-stale", response_model=list[RunOut])
+def reap_stale_runs(
+    job_id: str | None = None,
+    session: Session = Depends(db),
+    tenant: Tenant | None = Depends(current_tenant),
+) -> list[Run]:
+    """Mark stale RUNNING runs as timed out now, scoped to the visible workspace.
+
+    The worker does this on its tick loop, but exposing the same recovery path
+    lets operators unblock a queue immediately after a worker crash/restart.
+    """
+    job_id = _clean_optional_query_id(job_id)
+    job_ids: list[str] | None = None
+    if job_id is not None:
+        _get_job(session, job_id, tenant)
+        job_ids = [job_id]
+    elif tenant is not None:
+        job_ids = _tenant_job_ids(session, tenant)
+        if not job_ids:
+            return []
+    return reap_stale_running_runs(session, job_ids=job_ids)
 
 
 def _get_run(session: Session, run_id: str, tenant: Tenant | None) -> Run:

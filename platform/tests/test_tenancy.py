@@ -5,6 +5,8 @@ runs unauthenticated. These tests flip settings.auth_mode/admin_token per
 test via monkeypatch (both are read at request time).
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import inspect, select, text
 
@@ -147,6 +149,50 @@ def test_tenant_isolation_matrix(client, hosted):
     assert client.post(f"/jobs/{job['id']}/trigger", headers=auth_b).status_code == 404
     assert client.delete(f"/jobs/{job['id']}", headers=auth_b).status_code == 404
     assert client.get("/overview", headers=auth_b).json() == []
+
+
+def test_reap_stale_runs_is_tenant_scoped(client, hosted, session):
+    _, _, auth_a = _mint_tenant(client, "reap-team-a")
+    _, _, auth_b = _mint_tenant(client, "reap-team-b")
+    job_a = client.post(
+        "/jobs",
+        json={"name": "a-stale", "cron": None, "timeout_s": 1},
+        headers=auth_a,
+    ).json()
+    job_b = client.post(
+        "/jobs",
+        json={"name": "b-stale", "cron": None, "timeout_s": 1},
+        headers=auth_b,
+    ).json()
+    now = datetime.now(timezone.utc)
+    run_a = Run(
+        job_id=job_a["id"],
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=30),
+        started_at=now - timedelta(seconds=30),
+    )
+    run_b = Run(
+        job_id=job_b["id"],
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=30),
+        started_at=now - timedelta(seconds=30),
+    )
+    session.add_all([run_a, run_b])
+    session.commit()
+
+    resp = client.post("/runs/reap-stale", headers=auth_a)
+
+    assert resp.status_code == 200, resp.text
+    assert [r["id"] for r in resp.json()] == [run_a.id]
+    session.expire_all()
+    assert session.get(Run, run_a.id).status == RunStatus.TIMED_OUT
+    assert session.get(Run, run_b.id).status == RunStatus.RUNNING
+    assert (
+        client.post(
+            "/runs/reap-stale", params={"job_id": job_b["id"]}, headers=auth_a
+        ).status_code
+        == 404
+    )
 
 
 def test_hosted_lessons_are_tenant_scoped(client, hosted):

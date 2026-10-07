@@ -274,7 +274,10 @@ Job run history supports `?status=running` and `?stale=true` so automation can
 find stuck in-flight runs without scraping the dashboard. Use `GET /runs` for
 the same filters across all visible jobs, optionally narrowed with `job_id`;
 `GET /runs/summary` returns workspace run counts by status plus stale-running
-counts, and the dashboard surfaces those totals on the Jobs view.
+counts, and `POST /runs/reap-stale` marks stale running runs timed out
+immediately after a worker crash/restart, closing any open trace steps. The
+dashboard surfaces those totals on the Jobs view and offers a one-click
+stale-run reap action from the workspace summary or a job's stale run history.
 Set `TICLOUD_LOG_JSON=1` for one-JSON-object-per-line logs (with run/job
 ids) instead of plain text.
 

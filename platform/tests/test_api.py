@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -470,6 +470,49 @@ def test_global_runs_summary_counts_statuses_and_stale_runs(client, session):
 
     assert client.get("/runs/summary", params={"job_id": " \n\t "}).status_code == 422
     assert client.get("/runs/summary", params={"job_id": "missing"}).status_code == 404
+
+
+def test_reap_stale_runs_marks_only_scoped_runs_timed_out(client, session):
+    from ticloud.models import Run, RunStatus
+
+    job = create_job(client, name="reap-a", cron=None, timeout_s=1)
+    other = create_job(client, name="reap-b", cron=None, timeout_s=1)
+    now = datetime.now(timezone.utc)
+    stale = Run(
+        job_id=job["id"],
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=30),
+        started_at=now - timedelta(seconds=30),
+    )
+    fresh = Run(
+        job_id=job["id"],
+        status=RunStatus.RUNNING,
+        scheduled_at=now,
+        started_at=now,
+    )
+    other_stale = Run(
+        job_id=other["id"],
+        status=RunStatus.RUNNING,
+        scheduled_at=now - timedelta(seconds=30),
+        started_at=now - timedelta(seconds=30),
+    )
+    session.add_all([stale, fresh, other_stale])
+    session.commit()
+
+    resp = client.post("/runs/reap-stale", params={"job_id": job["id"]})
+
+    assert resp.status_code == 200, resp.text
+    assert [r["id"] for r in resp.json()] == [stale.id]
+    session.expire_all()
+    assert session.get(Run, stale.id).status == RunStatus.TIMED_OUT
+    assert "stale running run exceeded timeout" in session.get(Run, stale.id).error
+    assert session.get(Run, fresh.id).status == RunStatus.RUNNING
+    assert session.get(Run, other_stale.id).status == RunStatus.RUNNING
+    assert client.get("/runs/summary", params={"job_id": job["id"]}).json()[
+        "stale_running"
+    ] == 0
+    assert client.post("/runs/reap-stale", params={"job_id": " \n\t "}).status_code == 422
+    assert client.post("/runs/reap-stale", params={"job_id": "missing"}).status_code == 404
 
 
 def test_limit_validation_for_runs_stats_and_alerts(client):
