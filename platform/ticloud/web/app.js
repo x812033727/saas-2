@@ -110,12 +110,14 @@ function runSummaryTiles(summary) {
   const count = (key) => Number(byStatus[key] || 0);
   const active = count("queued") + count("awaiting_approval") + count("running");
   const blocked = count("failed") + count("timed_out") + count("budget_exceeded");
+  const stale = Number(summary.stale_running || 0);
   return `
     <div class="tiles run-summary">
       <div class="tile"><div class="k">Total runs</div><div class="v">${Number(summary.total || 0)}</div></div>
       <div class="tile"><div class="k">Active now</div><div class="v">${active}</div></div>
       <div class="tile"><div class="k">Blocked</div><div class="v">${blocked}</div></div>
-      <div class="tile"><div class="k">Stale running</div><div class="v">${Number(summary.stale_running || 0)}</div></div>
+      <div class="tile"><div class="k">Stale running</div><div class="v">${stale}</div>
+        ${stale ? '<button data-reap-stale>Reap stale</button>' : ""}</div>
     </div>`;
 }
 
@@ -525,6 +527,7 @@ async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
   const hasEnabledJobCases = jobCases.some((c) => c.enabled);
   const jobEvalResult = lastEvalJobId === id ? evalResultCard(lastEvalSummary) : "";
   const olderCursor = runs.length === RUN_PAGE_SIZE ? runHistoryCursor(runs) : null;
+  const canReapStale = runFilter === "stale" && runs.length;
   const historyPager = `
     <div class="history-pager">
       ${runCursor ? `<a class="button" href="${runFilterRoute(id, runFilter)}">Newest runs</a>` : ""}
@@ -651,6 +654,7 @@ async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
     ${historyPager}
     <div class="actions">
       <button class="primary" data-act="trigger" data-id="${job.id}">Run now</button>
+      ${canReapStale ? `<button data-reap-stale data-job="${esc(job.id)}">Reap stale</button>` : ""}
       <button data-act="${job.paused ? "resume" : "pause"}" data-id="${job.id}">${job.paused ? "Resume" : "Pause"}</button>
       <button class="danger" data-deljob="${esc(job.id)}" data-name="${esc(job.name)}">Delete job</button>
     </div>`;
@@ -1260,6 +1264,20 @@ app.addEventListener("click", (ev) => {
       return;
     }
     act("POST", `/runs/${runBtn.dataset.id}/${runBtn.dataset.runact}`, render);
+    return;
+  }
+  const reapBtn = ev.target.closest("button[data-reap-stale]");
+  if (reapBtn) {
+    ev.stopPropagation();
+    const job = reapBtn.dataset.job;
+    const suffix = job ? `?job_id=${encodeURIComponent(job)}` : "";
+    api(`/runs/reap-stale${suffix}`, { method: "POST" })
+      .then((runs) => {
+        const count = Array.isArray(runs) ? runs.length : 0;
+        toast(`reaped ${count} stale run${count === 1 ? "" : "s"}`);
+        render();
+      })
+      .catch((e) => toast(e.message));
     return;
   }
   const row = ev.target.closest("tr.rowlink");

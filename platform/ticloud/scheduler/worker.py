@@ -155,17 +155,23 @@ def execute_run(run_id: str) -> RunStatus:
 
 
 def _finish(session, run: Run, status: RunStatus, error: str | None = None) -> None:
+    finished_at = datetime.now(timezone.utc)
     run.status = status
     run.error = error
-    run.finished_at = datetime.now(timezone.utc)
+    run.finished_at = finished_at
+    for step in run.steps:
+        if step.finished_at is None:
+            step.finished_at = finished_at
     session.commit()
     log.info("run %s finished: %s", run.id, status.value)
 
 
-def reap_stale_running_runs(session, now: datetime | None = None) -> list[Run]:
+def reap_stale_running_runs(
+    session, now: datetime | None = None, job_ids: list[str] | None = None
+) -> list[Run]:
     """Recover runs left RUNNING after a worker crash or hard kill."""
     reaped: list[Run] = []
-    for run_id in stale_running_run_ids(session, now=now):
+    for run_id in stale_running_run_ids(session, job_ids, now=now):
         run = session.get(Run, run_id)
         if run is None or run.status != RunStatus.RUNNING:
             continue

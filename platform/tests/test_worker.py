@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from ticloud.models import Run, RunStatus
+from ticloud.models import Run, RunStatus, RunStep
 from ticloud.scheduler.queue import claim_next_run, enqueue_due_jobs, enqueue_manual
 from ticloud.scheduler.worker import _last_error_line, execute_run, reap_stale_running_runs
 
@@ -84,16 +84,28 @@ def test_reap_stale_running_runs_unblocks_scheduled_job(session):
         started_at=now - timedelta(seconds=30),
     )
     session.add(stuck)
+    session.flush()
+    open_step = RunStep(
+        run_id=stuck.id,
+        index=0,
+        role="engineer",
+        kind="phase",
+        name="Interrupted work",
+        started_at=now - timedelta(seconds=29),
+    )
+    session.add(open_step)
     session.commit()
 
     reaped = reap_stale_running_runs(session, now=now)
     created = enqueue_due_jobs(session, now=now)
 
     session.refresh(stuck)
+    session.refresh(open_step)
     assert [run.id for run in reaped] == [stuck.id]
     assert stuck.status == RunStatus.TIMED_OUT
     assert "stale running run" in stuck.error
     assert stuck.finished_at is not None
+    assert open_step.finished_at == stuck.finished_at
     assert len(created) == 1
     assert created[0].job_id == job.id
 

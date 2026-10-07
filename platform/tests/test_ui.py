@@ -487,6 +487,8 @@ def test_jobs_view_exposes_workspace_run_summary(client):
     assert 'class="tiles run-summary"' in app_js
     assert 'count("queued") + count("awaiting_approval") + count("running")' in app_js
     assert 'Number(summary.stale_running || 0)' in app_js
+    assert "data-reap-stale" in app_js
+    assert "`/runs/reap-stale${suffix}`" in app_js
     assert ".run-summary" in style_css
 
 
@@ -499,6 +501,8 @@ def test_job_detail_flags_and_cancels_stale_running_runs(client):
     assert "stuck running" in app_js
     assert "function runHistoryActions(run)" in app_js
     assert 'data-runact="cancel"' in app_js
+    assert 'data-reap-stale data-job="${esc(job.id)}"' in app_js
+    assert "job_id=${encodeURIComponent(job)}" in app_js
     assert "<th>Note</th><th></th>" in app_js
     assert "td .attention-pill.stale" in style_css
 
