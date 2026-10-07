@@ -164,6 +164,85 @@ def test_qa_failure_modes_filters_by_category(client, session):
     assert unknown.status_code == 422
 
 
+def test_qa_failure_modes_category_filter_composes_with_scope_and_promotion(client, session):
+    timeout_job = _create_job(
+        client,
+        name="qa-category-timeout-scope",
+        payload={},
+    )
+    rate_job = _create_job(
+        client,
+        name="qa-category-rate-scope",
+        payload={},
+    )
+    session.add_all(
+        [
+            Run(
+                job_id=timeout_job["id"],
+                status=RunStatus.FAILED,
+                error="TimeoutError: deadline exceeded after 30s",
+            ),
+            Run(
+                job_id=timeout_job["id"],
+                status=RunStatus.FAILED,
+                error="TimeoutError: deadline exceeded after 31s",
+            ),
+            Run(
+                job_id=rate_job["id"],
+                status=RunStatus.FAILED,
+                error="HTTPError: 429 too many requests",
+            ),
+        ]
+    )
+    session.commit()
+
+    scoped_timeout = client.get(
+        "/failure-modes",
+        params={
+            "job_id": timeout_job["id"],
+            "category": "timeout",
+            "min_count": 2,
+            "unpromoted_only": True,
+        },
+    )
+    assert scoped_timeout.status_code == 200, scoped_timeout.text
+    assert len(scoped_timeout.json()) == 1
+    assert scoped_timeout.json()[0]["category"] == "timeout"
+    assert scoped_timeout.json()[0]["count"] == 2
+    assert scoped_timeout.json()[0]["job_ids"] == [timeout_job["id"]]
+
+    wrong_category_in_scope = client.get(
+        "/failure-modes",
+        params={"job_id": timeout_job["id"], "category": "rate_limit"},
+    )
+    assert wrong_category_in_scope.status_code == 200, wrong_category_in_scope.text
+    assert wrong_category_in_scope.json() == []
+
+    promoted = client.post(
+        "/failure-modes/promote",
+        json={"signature": scoped_timeout.json()[0]["signature"], "job_id": timeout_job["id"]},
+    )
+    assert promoted.status_code == 201, promoted.text
+
+    promoted_timeout = client.get(
+        "/failure-modes",
+        params={
+            "job_id": timeout_job["id"],
+            "category": "timeout",
+            "unpromoted_only": True,
+        },
+    )
+    assert promoted_timeout.status_code == 200, promoted_timeout.text
+    assert promoted_timeout.json() == []
+
+    unpromoted_rate = client.get(
+        "/failure-modes",
+        params={"category": "rate_limit", "unpromoted_only": True},
+    )
+    assert unpromoted_rate.status_code == 200, unpromoted_rate.text
+    assert unpromoted_rate.json()[0]["job_ids"] == [rate_job["id"]]
+
+
 def test_qa_promote_trims_signature_and_rejects_blank_signature(client):
     job = _create_job(client, name="qa-promote-input", payload={"fail_at": 2})
     _trigger_failures(client, job["id"])
