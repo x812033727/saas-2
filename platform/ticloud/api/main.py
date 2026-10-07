@@ -20,7 +20,7 @@ from .. import stripe_billing, templates
 from .. import __version__
 from ..billing import month_to_date_cost, runs_since_filter, tenant_over_budget
 from ..db import SessionLocal, init_db
-from ..eval.failures import cluster_failures
+from ..eval.failures import FAILURE_CATEGORIES, cluster_failures
 from ..eval.runner import eval_cases_payload
 from ..config import settings
 from ..metrics import (
@@ -477,6 +477,17 @@ def _clean_optional_query_id(
     return value
 
 
+def _clean_failure_category(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip().lower()
+    if not value:
+        raise HTTPException(422, "category cannot be blank")
+    if value not in FAILURE_CATEGORIES:
+        raise HTTPException(422, f"unknown failure category {value!r}")
+    return value
+
+
 @app.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(
     job_id: str,
@@ -867,6 +878,7 @@ def delete_lesson(
 @app.get("/failure-modes", response_model=list[FailureModeOut])
 def failure_modes(
     job_id: str | None = None,
+    category: str | None = None,
     min_count: int = Query(1, ge=1),
     limit_runs: int = Query(500, ge=1, le=5000),
     unpromoted_only: bool = False,
@@ -875,6 +887,7 @@ def failure_modes(
 ) -> list[FailureModeOut]:
     """Failed runs clustered into recurring failure modes."""
     job_id = _clean_optional_query_id(job_id)
+    category = _clean_failure_category(category)
     if job_id is not None:
         _get_job(session, job_id, tenant)
     scope_ids = _tenant_job_ids(session, tenant) if tenant is not None else None
@@ -885,6 +898,8 @@ def failure_modes(
         limit_runs=limit_runs,
         min_count=min_count,
     )
+    if category is not None:
+        modes = [m for m in modes if m.category == category]
     promoted = _promoted_failure_signatures(session, modes, tenant)
     if unpromoted_only:
         modes = [m for m in modes if m.signature not in promoted]
@@ -892,6 +907,9 @@ def failure_modes(
         FailureModeOut(
             signature=m.signature,
             summary=m.summary,
+            category=m.category,
+            triage_hint=m.triage_hint,
+            semantic_key=m.semantic_key,
             count=m.count,
             promoted=m.signature in promoted,
             job_ids=sorted(m.job_ids),

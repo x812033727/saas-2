@@ -1,6 +1,7 @@
 import pytest
 
 from ticloud.config import settings
+from ticloud.models import Run, RunStatus
 from ticloud.scheduler.worker import execute_run
 
 
@@ -68,6 +69,8 @@ def test_qa_failure_modes_combines_min_count_and_unpromoted_filters(client):
     assert recurring.json()[0]["summary"].startswith(
         "RuntimeError: simulated failure at step <n>"
     )
+    assert recurring.json()[0]["category"] == "runtime"
+    assert "latest run trace" in recurring.json()[0]["triage_hint"]
     assert recurring.json()[0]["count"] == 2
     assert recurring.json()[0]["promoted"] is False
 
@@ -115,6 +118,50 @@ def test_qa_failure_modes_limit_runs_bounds_scan_window(client):
 
     invalid = client.get("/failure-modes?limit_runs=0")
     assert invalid.status_code == 422
+
+
+def test_qa_failure_modes_filters_by_category(client, session):
+    runtime_job = _create_job(
+        client,
+        name="qa-category-runtime",
+        payload={"fail_at": 1},
+    )
+    rate_job = _create_job(
+        client,
+        name="qa-category-rate",
+        payload={},
+    )
+    session.add_all(
+        [
+            Run(
+                job_id=runtime_job["id"],
+                status=RunStatus.FAILED,
+                error="RuntimeError: simulated failure at step 1",
+            ),
+            Run(
+                job_id=rate_job["id"],
+                status=RunStatus.FAILED,
+                error="HTTPError: 429 too many requests",
+            ),
+        ]
+    )
+    session.commit()
+
+    runtime = client.get("/failure-modes?category=runtime")
+    assert runtime.status_code == 200, runtime.text
+    assert [m["job_ids"] for m in runtime.json()] == [[runtime_job["id"]]]
+
+    rate_limit = client.get("/failure-modes", params={"category": " RATE_LIMIT "})
+    assert rate_limit.status_code == 200, rate_limit.text
+    assert rate_limit.json()[0]["category"] == "rate_limit"
+    assert rate_limit.json()[0]["semantic_key"] == "rate_limit"
+    assert rate_limit.json()[0]["job_ids"] == [rate_job["id"]]
+
+    blank = client.get("/failure-modes", params={"category": " \t "})
+    assert blank.status_code == 422
+
+    unknown = client.get("/failure-modes?category=database")
+    assert unknown.status_code == 422
 
 
 def test_qa_promote_trims_signature_and_rejects_blank_signature(client):

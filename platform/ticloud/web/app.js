@@ -78,6 +78,19 @@ const TERMINAL_RUN_STATUSES = new Set([
 const RUN_PAGE_SIZE = 50;
 const badge = (status) =>
   `<span class="badge ${esc(status)}"><span class="dot"></span>${esc(STATUS_LABEL[status] || status)}</span>`;
+const failureFamily = (m) => m.semantic_key ? `<span>family ${esc(m.semantic_key)}</span>` : "";
+const failureTriage = (m) =>
+  `<br><small class="failure-triage"><span>${esc(m.category || "runtime")}</span>${failureFamily(m)} ${esc(m.triage_hint || "")}</small>`;
+const FAILURE_CATEGORIES = [
+  ["runtime", "Runtime"],
+  ["timeout", "Timeout"],
+  ["rate_limit", "Rate limit"],
+  ["auth", "Auth"],
+  ["network", "Network"],
+  ["dependency", "Dependency"],
+  ["validation", "Validation"],
+  ["budget", "Budget"],
+];
 const RUN_HISTORY_FILTERS = [
   ["all", "All"],
   ["queued", "Queued"],
@@ -194,11 +207,25 @@ function failureRoute(filter, limitRuns) {
   return `#/failures${filterPath}${windowPath}`;
 }
 
+const failureCategoryFilter = (category) => `category-${category}`;
+
+function failureCategoryFromFilter(filter) {
+  const match = /^category-([a-z_]+)$/.exec(String(filter || ""));
+  const category = match ? match[1] : null;
+  const categoryKeys = typeof FAILURE_CATEGORIES === "undefined"
+    ? ["runtime", "timeout", "rate_limit", "auth", "network", "dependency", "validation", "budget"]
+    : FAILURE_CATEGORIES.map(([key]) => key);
+  return categoryKeys.includes(category) ? category : null;
+}
+
 function parseFailureRoute(filter = "all", windowSegment = "") {
-  const validFilter = ["recurring", "unpromoted"].includes(filter) ? filter : "all";
+  const category = failureCategoryFromFilter(filter);
+  const validFilter = ["recurring", "unpromoted"].includes(filter) || category ? filter : "all";
   const rawWindow = validFilter === "all" ? filter : windowSegment;
   const match = /^last-(100|500|1000|5000)$/.exec(rawWindow || "");
-  return { filter: validFilter, limitRuns: match ? Number(match[1]) : 500 };
+  const route = { filter: validFilter, limitRuns: match ? Number(match[1]) : 500 };
+  if (category) route.category = category;
+  return route;
 }
 
 function evalCaseRows(c) {
@@ -563,6 +590,7 @@ async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
           <tr>
             <td><code style="font-size:12px">${esc(m.signature)}</code></td>
             <td style="max-width:420px">${esc(m.summary)}
+              ${failureTriage(m)}
               ${m.latest_run_id ? `<br><a href="#/runs/${m.latest_run_id}"><small>latest run</small></a>` : ""}</td>
             <td class="num">${m.count}</td>
             <td>${relTime(m.last_seen)}</td>
@@ -925,12 +953,14 @@ async function failuresView(filter = "all", windowSegment = "") {
   const route = parseFailureRoute(filter, windowSegment);
   filter = route.filter;
   const limitRuns = route.limitRuns;
+  const category = route.category;
   const recurringOnly = filter === "recurring";
   const unpromotedOnly = filter === "unpromoted";
   const params = new URLSearchParams({
     min_count: String(recurringOnly ? 2 : 1),
     limit_runs: String(limitRuns),
   });
+  if (category) params.set("category", category);
   if (unpromotedOnly) params.set("unpromoted_only", "true");
   const [modes, cases, jobs, usage] = await Promise.all([
     api(`/failure-modes?${params}`),
@@ -948,6 +978,7 @@ async function failuresView(filter = "all", windowSegment = "") {
     <tr>
       <td><code style="font-size:12px">${esc(m.signature)}</code></td>
       <td style="max-width:420px">${esc(m.summary)}
+        ${failureTriage(m)}
         ${m.latest_run_id ? `<br><a href="#/runs/${m.latest_run_id}"><small>latest run</small></a>` : ""}</td>
       <td class="num">${m.count}</td>
       <td>${relTime(m.last_seen)}</td>
@@ -966,6 +997,10 @@ async function failuresView(filter = "all", windowSegment = "") {
       <a class="${filter === "all" ? "active" : ""}" href="${failureRoute("all", limitRuns)}">All</a>
       <a class="${recurringOnly ? "active" : ""}" href="${failureRoute("recurring", limitRuns)}">Recurring</a>
       <a class="${unpromotedOnly ? "active" : ""}" href="${failureRoute("unpromoted", limitRuns)}">Unpromoted</a>
+    </div>
+    <div class="tabs" aria-label="Failure category filters">
+      ${FAILURE_CATEGORIES.map(([key, label]) =>
+        `<a class="${category === key ? "active" : ""}" href="${failureRoute(failureCategoryFilter(key), limitRuns)}">${label}</a>`).join("")}
     </div>
     <div class="tabs" aria-label="Failure scan window">
       ${[100, 500, 1000, 5000].map((n) =>

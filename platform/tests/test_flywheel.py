@@ -4,7 +4,13 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from ticloud.eval.cli import list_cases, run_cases
-from ticloud.eval.failures import cluster_failures, error_signature, normalize_error
+from ticloud.eval.failures import (
+    classify_failure,
+    cluster_failures,
+    error_signature,
+    normalize_error,
+    semantic_failure_key,
+)
 from ticloud.models import EvalCase, Lesson, Run, RunStatus
 from ticloud.scheduler.queue import claim_next_run, enqueue_manual
 from ticloud.scheduler.worker import execute_run
@@ -63,6 +69,29 @@ def test_error_signature_normalizes_noise():
     assert "<n>" in normalize_error(a)
 
 
+def test_classify_failure_returns_actionable_triage():
+    category, hint = classify_failure("TimeoutError: deadline exceeded after 30s")
+    assert category == "timeout"
+    assert "timeout_s" in hint
+
+    category, hint = classify_failure("HTTPError: 429 too many requests")
+    assert category == "rate_limit"
+    assert "Back off" in hint
+
+    category, hint = classify_failure("RuntimeError: simulated failure at step 2")
+    assert category == "runtime"
+    assert "latest run trace" in hint
+
+
+def test_semantic_failure_key_groups_known_failure_families():
+    a = "HTTPError: 429 too many requests"
+    b = "RateLimitError: rate limit reached for model"
+
+    assert error_signature(a) != error_signature(b)
+    assert semantic_failure_key(a) == semantic_failure_key(b) == "rate_limit"
+    assert semantic_failure_key("RuntimeError: simulated failure") == "runtime:runtimeerror"
+
+
 def test_cluster_failures_groups_by_signature(session):
     job = make_job(session, max_retries=0, payload={"fail_at": 3})
     for _ in range(3):
@@ -78,6 +107,9 @@ def test_cluster_failures_groups_by_signature(session):
     modes = cluster_failures(session)
     assert len(modes) == 2
     assert modes[0].count == 3  # most frequent first
+    assert modes[0].category == "runtime"
+    assert "latest run trace" in modes[0].triage_hint
+    assert modes[0].semantic_key == "runtime:runtimeerror"
     assert modes[1].count == 1
     assert modes[0].latest_run_id in modes[0].sample_run_ids
 
