@@ -184,6 +184,7 @@ def test_ui_exposes_job_settings_editor(client):
     assert "`/jobs/${id}`" in app_js
     assert 'name="approval_required"' in app_js
     assert 'name="webhook_url"' in app_js
+    assert 'name="scorers"' in app_js
 
 
 def test_ui_exposes_job_schedule_preview(client):
@@ -237,6 +238,7 @@ def test_ui_custom_job_creation_exposes_core_guard_fields(client):
     assert 'name="webhook_url"' in app_js
     assert 'body.max_retries = Number(f.get("max_retries"))' in app_js
     assert 'body.retry_backoff_s = Number(f.get("retry_backoff_s"))' in app_js
+    assert 'scorers = parseJsonObject(f.get("scorers"), "scorers")' in app_js
     assert 'if (webhookUrl) body.webhook_url = webhookUrl' in app_js
 
 
@@ -248,7 +250,8 @@ def test_ui_exposes_custom_job_payload_editor(client):
     assert '<textarea name="payload" rows="4" placeholder=' in app_js
     assert '${esc(JSON.stringify(job.payload || {}, null, 2))}' in app_js
     assert 'payload = parseJsonObject(f.get("payload"), "payload")' in app_js
-    assert 'const body = { name: f.get("name"), engine: f.get("engine"), payload }' in app_js
+    assert '${esc(JSON.stringify(job.scorers || {}, null, 2))}' in app_js
+    assert 'const body = { name: f.get("name"), engine: f.get("engine"), payload, scorers }' in app_js
     assert "form.newjob textarea" in style_css
     assert "form.jobsettings textarea" in style_css
     assert "form.newjob label.wide" in style_css

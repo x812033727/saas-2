@@ -541,6 +541,7 @@ def update_job(
     job's run history, lessons, and failure clusters (delete+recreate did)."""
     job = _get_job(session, job_id, tenant)
     changes = body.model_dump(exclude_unset=True)
+    was_paused = job.paused
     if "name" in changes and changes["name"] != job.name:
         tenant_id = tenant.id if tenant is not None else None
         clash = session.scalar(
@@ -553,7 +554,7 @@ def update_job(
     _reject_dual_schedule(job, changes)
     for field, value in changes.items():
         setattr(job, field, value)
-    if _SCHEDULE_FIELDS & changes.keys():
+    if _SCHEDULE_FIELDS & changes.keys() or (was_paused and changes.get("paused") is False):
         job.next_run_at = compute_next_run(job)
     session.commit()
     return job

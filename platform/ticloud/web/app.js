@@ -382,6 +382,10 @@ function jobSettingsForm(job) {
       <div class="card">
         <form class="jobsettings" id="jobsettings">
           <label>name <input name="name" required value="${formValue(job.name)}"></label>
+          <label>engine <select name="engine">
+            <option value="offline" ${job.engine === "offline" ? "selected" : ""}>offline</option>
+            <option value="ti" ${job.engine === "ti" ? "selected" : ""}>ti</option>
+          </select></label>
           <label>cron (optional) <input name="cron" placeholder="0 2 * * *" value="${formValue(job.cron)}"></label>
           <label>interval seconds (optional) <input name="interval_seconds" type="number" min="10" value="${formValue(job.interval_seconds)}"></label>
           <label class="wide">payload JSON <textarea name="payload" rows="4">${esc(JSON.stringify(job.payload || {}, null, 2))}</textarea></label>
@@ -394,7 +398,9 @@ function jobSettingsForm(job) {
             <option value="alert" ${job.on_low_score === "alert" ? "selected" : ""}>alert</option>
             <option value="pause" ${job.on_low_score === "pause" ? "selected" : ""}>pause</option>
           </select></label>
+          <label class="wide">scorers JSON <textarea name="scorers" rows="3">${esc(JSON.stringify(job.scorers || {}, null, 2))}</textarea></label>
           <label>webhook URL (optional) <input name="webhook_url" type="url" value="${formValue(job.webhook_url)}"></label>
+          <label class="checkrow"><input name="paused" type="checkbox" ${job.paused ? "checked" : ""}> paused</label>
           <label class="checkrow"><input name="approval_required" type="checkbox" ${job.approval_required ? "checked" : ""}> approval required</label>
           <button class="primary submit" type="submit">Save settings</button>
         </form>
@@ -457,6 +463,7 @@ async function jobsView() {
           <label>retry backoff s <input name="retry_backoff_s" type="number" min="0" value="0"></label>
           <label>quality gate (0–1, optional) <input name="score_threshold" type="number" step="0.05" min="0" max="1" placeholder="0.7"></label>
           <label>on low score <select name="on_low_score"><option>alert</option><option>pause</option></select></label>
+          <label class="wide">scorers JSON <textarea name="scorers" rows="3" placeholder='{"judge":{"enabled":true}}'></textarea></label>
           <label>webhook URL (optional) <input name="webhook_url" type="url" placeholder="https://hooks.slack.com/..."></label>
           <label class="checkrow"><input name="approval_required" type="checkbox"> approval required</label>
           <button class="primary submit" type="submit">Create job</button>
@@ -468,9 +475,13 @@ async function jobsView() {
     ev.preventDefault();
     const f = new FormData(ev.target);
     let payload;
-    try { payload = parseJsonObject(f.get("payload"), "payload"); }
+    let scorers;
+    try {
+      payload = parseJsonObject(f.get("payload"), "payload");
+      scorers = parseJsonObject(f.get("scorers"), "scorers");
+    }
     catch (e) { toast(e.message); return; }
-    const body = { name: f.get("name"), engine: f.get("engine"), payload };
+    const body = { name: f.get("name"), engine: f.get("engine"), payload, scorers };
     if (f.get("cron")) body.cron = f.get("cron");
     if (f.get("interval_seconds")) body.interval_seconds = Number(f.get("interval_seconds"));
     body.budget_usd = Number(f.get("budget_usd"));
@@ -672,10 +683,15 @@ async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
       return value ? Number(value) : null;
     };
     let payload;
-    try { payload = parseJsonObject(f.get("payload"), "payload"); }
+    let scorers;
+    try {
+      payload = parseJsonObject(f.get("payload"), "payload");
+      scorers = parseJsonObject(f.get("scorers"), "scorers");
+    }
     catch (e) { toast(e.message); return; }
     const body = {
       name: String(f.get("name") || "").trim(),
+      engine: f.get("engine"),
       payload,
       cron: optionalText("cron"),
       interval_seconds: optionalNumber("interval_seconds"),
@@ -685,7 +701,9 @@ async function jobDetailView(id, rawRunFilter = "all", rawCursor = null) {
       retry_backoff_s: Number(f.get("retry_backoff_s")),
       score_threshold: optionalNumber("score_threshold"),
       on_low_score: f.get("on_low_score"),
+      scorers,
       webhook_url: optionalText("webhook_url"),
+      paused: f.get("paused") === "on",
       approval_required: f.get("approval_required") === "on",
     };
     try {

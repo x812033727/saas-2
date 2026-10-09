@@ -10,7 +10,9 @@ from ..validation import validate_webhook_url
 
 _NON_NULL_JOB_UPDATE_FIELDS = {
     "name",
+    "engine",
     "payload",
+    "paused",
     "timeout_s",
     "budget_usd",
     "max_retries",
@@ -115,9 +117,11 @@ class JobUpdate(WriteModel):
     Reuses JobCreate's validators; schedule fields re-anchor next_run_at."""
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    engine: str | None = None
     payload: dict | None = None
     cron: str | None = None
     interval_seconds: int | None = Field(default=None, ge=10)
+    paused: bool | None = None
     timeout_s: int | None = Field(default=None, ge=1)
     budget_usd: float | None = Field(default=None, gt=0)
     max_retries: int | None = Field(default=None, ge=0)
@@ -162,6 +166,13 @@ class JobUpdate(WriteModel):
     @classmethod
     def _valid_scorers(cls, v: dict | None) -> dict | None:
         return _validate_scorers_config(v)
+
+    @field_validator("engine")
+    @classmethod
+    def _known_engine(cls, v: str | None) -> str | None:
+        if v is not None and v not in ENGINES:
+            raise ValueError(f"unknown engine {v!r}; available: {sorted(ENGINES)}")
+        return v
 
     @field_validator("cron")
     @classmethod

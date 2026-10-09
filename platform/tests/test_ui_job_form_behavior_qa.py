@@ -38,6 +38,7 @@ def test_qa_custom_job_form_posts_payload_retries_and_webhook_and_blocks_bad_jso
         retry_backoff_s: "15",
         score_threshold: "0.8",
         on_low_score: "pause",
+        scorers: '{"judge":{"enabled":true}}',
         webhook_url: "  https://hooks.example/qa  ",
         approval_required: "on",
       },
@@ -147,6 +148,7 @@ def test_qa_custom_job_form_posts_payload_retries_and_webhook_and_blocks_bad_jso
         retry_backoff_s: 15,
         score_threshold: 0.8,
         on_low_score: "pause",
+        scorers: { judge: { enabled: true } },
         webhook_url: "https://hooks.example/qa",
         approval_required: true,
       });
@@ -176,6 +178,7 @@ def test_qa_job_settings_form_patches_payload_and_clears_blank_optionals():
     const jobSettingsForm = {
       values: {
         name: "  qa-updated  ",
+        engine: "ti",
         cron: "",
         interval_seconds: "30",
         payload: "{bad json",
@@ -185,7 +188,9 @@ def test_qa_job_settings_form_patches_payload_and_clears_blank_optionals():
         retry_backoff_s: "20",
         score_threshold: "",
         on_low_score: "alert",
+        scorers: "{bad json",
         webhook_url: "   ",
+        paused: "on",
         approval_required: undefined,
       },
       handlers: {},
@@ -227,6 +232,7 @@ def test_qa_job_settings_form_patches_payload_and_clears_blank_optionals():
       webhook_url: "https://hooks.example/old",
       approval_required: false,
       next_run_at: null,
+      scorers: { completion: { enabled: true } },
     };
 
     const context = {
@@ -301,12 +307,22 @@ def test_qa_job_settings_form_patches_payload_and_clears_blank_optionals():
 
       jobSettingsForm.values.payload = '{"fail_at":2,"nested":{"step":"review"}}';
       await jobSettingsForm.handlers.submit({ preventDefault() {}, target: jobSettingsForm });
+      assert.strictEqual(
+        calls.filter((call) => call.path === "/jobs/job-1" && call.opts.method === "PATCH").length,
+        0,
+        "invalid settings scorers JSON should not PATCH the job",
+      );
+      assert.strictEqual(toastEl.textContent, "scorers must be a JSON object");
+
+      jobSettingsForm.values.scorers = '{"judge":{"enabled":true}}';
+      await jobSettingsForm.handlers.submit({ preventDefault() {}, target: jobSettingsForm });
 
       const patches = calls.filter((call) => call.path === "/jobs/job-1" && call.opts.method === "PATCH");
       assert.strictEqual(patches.length, 1);
       const body = JSON.parse(patches[0].opts.body);
       assert.deepStrictEqual(body, {
         name: "qa-updated",
+        engine: "ti",
         payload: {
           fail_at: 2,
           nested: { step: "review" },
@@ -319,7 +335,9 @@ def test_qa_job_settings_form_patches_payload_and_clears_blank_optionals():
         retry_backoff_s: 20,
         score_threshold: null,
         on_low_score: "alert",
+        scorers: { judge: { enabled: true } },
         webhook_url: null,
+        paused: true,
         approval_required: false,
       });
       console.log("QA_JOB_SETTINGS_FORM_OK", JSON.stringify(body));
