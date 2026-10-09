@@ -129,6 +129,25 @@ def test_pause_resume(client):
     assert resumed["next_run_at"] is not None
 
 
+def test_update_job_can_pause_and_resume_with_reanchored_schedule(client, session):
+    from ticloud.models import Job
+
+    job = create_job(client, cron=None, interval_seconds=900)
+    paused = client.patch(f"/jobs/{job['id']}", json={"paused": True})
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["paused"] is True
+
+    db_job = session.get(Job, job["id"])
+    db_job.next_run_at = datetime.now(timezone.utc) - timedelta(days=1)
+    db_job.paused = True
+    session.commit()
+
+    resumed = client.patch(f"/jobs/{job['id']}", json={"paused": False})
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["paused"] is False
+    assert datetime.fromisoformat(resumed.json()["next_run_at"]) > datetime.now(timezone.utc)
+
+
 def test_update_job_requires_clearing_existing_schedule(client):
     job = create_job(client)
 
@@ -203,7 +222,9 @@ def test_update_job_rejects_null_required_fields(client):
     job = create_job(client)
     required_fields = [
         "name",
+        "engine",
         "payload",
+        "paused",
         "timeout_s",
         "budget_usd",
         "max_retries",
@@ -234,6 +255,31 @@ def test_update_job_rejects_non_boolean_scorer_enabled(client):
     )
     assert resp.status_code == 422
     assert "scorers.judge.enabled" in resp.text
+
+
+def test_update_job_can_change_engine_without_losing_runs(client):
+    job = create_job(client, cron=None, engine="offline")
+    run = client.post(f"/jobs/{job['id']}/trigger").json()
+
+    patched = client.patch(
+        f"/jobs/{job['id']}",
+        json={
+            "engine": "ti",
+            "payload": {"repo_url": "https://github.com/acme/widgets", "brief": "patrol"},
+        },
+    )
+
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["engine"] == "ti"
+    assert client.get(f"/jobs/{job['id']}/runs").json()[0]["id"] == run["id"]
+
+
+def test_update_job_rejects_unknown_engine(client):
+    job = create_job(client)
+
+    resp = client.patch(f"/jobs/{job['id']}", json={"engine": "warp-drive"})
+
+    assert resp.status_code == 422
 
 
 def test_delete_job_removes_history(client, session):
